@@ -11,7 +11,7 @@ from fees import (SCHOOL_NAME, SCHOOL_ADDRESS, SCHOOL_YEAR, SCHOOL_EMAIL,
 import db as _db
 from payroll import (compute_payroll, compute_monthly_payroll, sss_employee,
                       philhealth_employee, pagibig_employee,
-                      EMPLOYEE_TYPES, ALLOWANCE_TYPES, OTHER_DEDUCTION_TYPES,
+                      EMPLOYEE_TYPES, OTHER_DEDUCTION_TYPES,
                       SEPI_INITIAL_STAFF)
 from hr_pdf import build_payslip, build_payroll_summary, build_coe, build_leave_form
 from pdf_gen import build_enrollment_form, build_contract, build_soa
