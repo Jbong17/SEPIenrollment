@@ -15,7 +15,7 @@ from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
 
 from fees import (SCHOOL_NAME, SCHOOL_ADDRESS, SCHOOL_EMAIL, SCHOOL_PHONE,
-                  SCHOOL_CITY, SCHOOL_YEAR, LEVEL_LABEL, compute_fees)
+                  SCHOOL_CITY, SCHOOL_YEAR, LEVEL_LABEL, compute_fees, DISCOUNT_BY_KEY)
 
 # ── Page layout ───────────────────────────────────────────────────────────────
 LONG_BOND  = (8.5 * inch, 13 * inch)
@@ -278,6 +278,8 @@ def build_enrollment_form(s: dict) -> bytes:
                             bottomMargin=MARGIN + 0.4*inch)
     story = []
     sy    = s.get("schoolYear", SCHOOL_YEAR)
+    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
+                         s.get("discountKey"), s.get("discountRate"))
 
     story.append(_logo_header(sy))
     story.append(Spacer(1, 5))
@@ -367,11 +369,38 @@ def build_enrollment_form(s: dict) -> bytes:
     llbl = {"preschool": "Kinder/Preschool", "elementary": "Elementary",
              "jhs": "Junior High School"}
     grade_disp = f"{llbl.get(s.get('level',''),'—')} — {s.get('grade','—')}"
-    story.append(_row2("School Year", sy,
-                       "Grade Level", grade_disp))
-    pm = (s.get("paymentMode","Cash") or "Cash").capitalize()
-    story.append(_row2("Strand / Track", s.get("strand","N/A") or "N/A",
-                       "Mode of Payment", pm))
+    story.append(_row2("School Year", sy, "Grade Level", grade_disp))
+    pm      = (s.get("paymentMode","Cash") or "Cash").capitalize()
+    esc_txt = "Yes" if s.get("escGrantee") else "No"
+    story.append(_row2("Mode of Payment", pm, "ESC Grantee", esc_txt))
+    story.append(Spacer(1, 4))
+
+    # ── 4B. Scholarship / Discount ────────────────────────────────────────────
+    story.append(_sec("4B.  SCHOLARSHIP / DISCOUNT"))
+    story.append(Spacer(1, 3))
+    disc_info_ef = s.get("discountInfo") or fdata.get("discount")
+    if disc_info_ef:
+        d_key  = disc_info_ef.get("key","")
+        d_lbl  = disc_info_ef.get("label","")
+        d_rate = disc_info_ef.get("rate", 0)
+        d_amt  = disc_info_ef.get("amount", 0)
+        d_base = disc_info_ef.get("base_tuition", 0)
+        story.append(_row1("Discount Type Availed", d_lbl))
+        story.append(_row2("Discount Rate", f"{d_rate}% on Tuition Fee",
+                           "Discount Amount", f"PHP {_peso(d_amt)}"))
+        story.append(_row2("Tuition (Original)", f"PHP {_peso(d_base)}",
+                           "Tuition (After Discount)", f"PHP {_peso(d_base - d_amt)}"))
+        if s.get("discountRemarks"):
+            story.append(_row1("Supporting Documents / Remarks", s.get("discountRemarks","")))
+        story.append(Paragraph(
+            "<i>Discount applies to tuition fee only. Subject to document verification. "
+            "Non-cumulative, non-transferable, and non-convertible to cash. "
+            "Only one discount per student per school year. — SEPI Discount Policy</i>",
+            ParagraphStyle("disc_note", fontName="Helvetica-Oblique", fontSize=7.5,
+                           textColor=C_GRAY, leading=11, spaceAfter=3)))
+    else:
+        story.append(_row2("Discount Type", "No Discount / Not Applicable",
+                           "ESC Grantee", esc_txt))
     story.append(Spacer(1, 4))
 
     # ── 5. Documents Checklist ────────────────────────────────────────────────
@@ -431,7 +460,7 @@ def build_enrollment_form(s: dict) -> bytes:
     # ── 7. For Registrar Use Only ─────────────────────────────────────────────
     story.append(_sec("7.   FOR REGISTRAR USE ONLY"))
     story.append(Spacer(1, 3))
-    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"))
+    # fdata already computed at top of function
     story.append(_row2("Tracking ID",       s.get("trackingId",""),
                        "Enrollment Status", (s.get("status","Pending") or "Pending").capitalize()))
     story.append(_row2("Total Assessed Fees", f"PHP {_peso(fdata['total'])}",
@@ -584,7 +613,8 @@ def build_soa(s: dict) -> bytes:
                              bottomMargin=MARGIN + 0.4*inch)
     story = []
     sy    = s.get("schoolYear", SCHOOL_YEAR)
-    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"))
+    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
+                         s.get("discountKey"), s.get("discountRate"))
     lines = fdata["lines"]
     total = fdata["total"]
     paid  = float(s.get("paidAmount", 0) or 0)
@@ -604,7 +634,14 @@ def build_soa(s: dict) -> bytes:
     # Student header rows
     story.append(_row2("Student Name",    name,                   "Grade Level",    gdisp))
     story.append(_row2("Tracking ID",     s.get("trackingId","—"), "LRN",            s.get("lrn","—")))
-    story.append(_row2("ESC Grantee",     "\u2610 Yes   \u2610 No",  "Other Subsidy",  "N/A"))
+    esc_disp = "Yes (ESC Grantee)" if s.get("escGrantee") else "No"
+    disc_disp = ""
+    disc_soa = s.get("discountInfo") or fdata.get("discount")
+    if disc_soa:
+        disc_disp = f"{disc_soa.get('label','')} ({disc_soa.get('rate',0)}%)"
+    else:
+        disc_disp = "None"
+    story.append(_row2("ESC Grantee", esc_disp, "Discount Applied", disc_disp))
     story.append(_row2("Parent/Guardian", pname,                   "Contact Number", s.get("phone","—")))
     story.append(Spacer(1, 6))
 
@@ -640,8 +677,18 @@ def build_soa(s: dict) -> bytes:
     story.append(_sec(f"B.   CURRENT SCHOOL YEAR ASSESSMENT  (SY {sy})"))
     story.append(Spacer(1, 3))
     curr = [["Particulars", "Amount (PHP)"]]
+    disc_info_soa = s.get("discountInfo") or fdata.get("discount")
     for k, v in lines.items():
-        curr.append([k, _peso(v)])
+        if k == "Tuition Fee" and disc_info_soa:
+            d_base = disc_info_soa.get("base_tuition", v)
+            d_amt  = disc_info_soa.get("amount", 0)
+            d_rate = disc_info_soa.get("rate", 0)
+            curr.append([f"Tuition Fee (Gross)", _peso(d_base)])
+            curr.append([f"  Less: {disc_info_soa.get('label','')} ({d_rate}%)",
+                         f"({_peso(d_amt)})"])
+            curr.append(["Tuition Fee (Net)", _peso(v)])
+        else:
+            curr.append([k, _peso(v)])
     curr.append(["TOTAL SCHOOL FEES", _peso(total)])
     tc = Table(curr, colWidths=[FW, 1.8*inch])
     tc.setStyle(_fee_ts(len(curr)))
