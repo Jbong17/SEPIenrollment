@@ -6,7 +6,7 @@ SY 2026–2027
 import streamlit as st
 import json, uuid, datetime, io, os, base64
 from fees import (SCHOOL_NAME, SCHOOL_ADDRESS, SCHOOL_YEAR, SCHOOL_EMAIL,
-                  SCHOOL_PHONE, LEVEL_LABEL, GRADES, STRANDS, compute_fees)
+                  SCHOOL_PHONE, LEVEL_LABEL, GRADES, compute_fees)
 from pdf_gen import build_enrollment_form, build_contract, build_soa
 
 # ── Page config ────────────────────────────────────────────────────────────────
