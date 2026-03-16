@@ -69,8 +69,7 @@ def _S():
                     textColor=C_PINK, leading=14)
     s["sec"]    = ParagraphStyle("sec",   fontName="Helvetica-Bold", fontSize=8,
                     textColor=C_WHITE, alignment=TA_LEFT, spaceAfter=0,
-                    spaceBefore=8, backColor=C_PINK, leftIndent=6,
-                    leading=13, borderPadding=(3,4,3,4))
+                    spaceBefore=0, leading=13)
     s["lbl"]    = ParagraphStyle("lbl",   fontName="Helvetica-Bold", fontSize=7.5,
                     textColor=C_PINK, leading=10)
     s["val"]    = ParagraphStyle("val",   fontName="Helvetica",      fontSize=8.5,
@@ -261,7 +260,18 @@ def _hline():
     return HRFlowable(width="100%", thickness=1.5, color=C_PINK_MID, spaceAfter=5)
 
 def _sec(text):
-    return Paragraph(f"&nbsp; {text}", ST["sec"])
+    """Full-width pink section header bar — uses Table to guarantee edge-to-edge fill."""
+    p = Paragraph(f"  {text}", ST["sec"])
+    t = Table([[p]], colWidths=[CW])
+    t.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0), (0,0), C_PINK),
+        ("LEFTPADDING",   (0,0), (0,0), 8),
+        ("RIGHTPADDING",  (0,0), (0,0), 8),
+        ("TOPPADDING",    (0,0), (0,0), 5),
+        ("BOTTOMPADDING", (0,0), (0,0), 5),
+        ("VALIGN",        (0,0), (0,0), "MIDDLE"),
+    ]))
+    return t
 
 def _peso(n):
     return f"{float(n or 0):,.2f}"
@@ -403,7 +413,9 @@ def build_enrollment_form(s: dict) -> bytes:
                            "ESC Grantee", esc_txt))
     story.append(Spacer(1, 4))
 
-    # ── 5. Documents Checklist ────────────────────────────────────────────────
+    # ── 5. Documents Checklist — always start on a fresh page ──────────────
+    from reportlab.platypus import PageBreak
+    story.append(PageBreak())
     story.append(_sec("5.   REQUIRED DOCUMENTS CHECKLIST"))
     story.append(Spacer(1, 3))
     docs_list = [
