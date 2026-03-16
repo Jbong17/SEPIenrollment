@@ -329,7 +329,7 @@ def page_enroll():
         f["previousSchool"]  = st.text_input("Last School Attended", value=f.get("previousSchool",""))
 
         # Show fee preview
-        fdata = compute_fees(f["level"], f["grade"])
+        fdata = compute_fees(f["level"], f["grade"], esc_grantee=f.get("escGrantee", False))
         st.markdown('<div class="section-hdr">FEE PREVIEW</div>', unsafe_allow_html=True)
         cols = st.columns(len(fdata["lines"]) + 1)
         for i, (k, v) in enumerate(fdata["lines"].items()):
@@ -474,7 +474,8 @@ def page_enroll():
         if f.get("level") and f.get("grade"):
             fdata_preview = compute_fees(
                 f["level"], f["grade"],
-                f.get("discountKey"), f.get("discountRate")
+                f.get("discountKey"), f.get("discountRate"),
+                esc_grantee=f.get("escGrantee", False)
             )
             st.markdown("---")
             st.markdown("**💰 Updated Fee Preview**")
@@ -498,7 +499,9 @@ def page_enroll():
 
     elif st.session_state.enroll_step == 6:
         st.markdown('<div class="section-hdr">6. REVIEW & SUBMIT</div>', unsafe_allow_html=True)
-        fdata = compute_fees(f.get("level","jhs"), f.get("grade","Grade 7"))
+        fdata = compute_fees(f.get("level","jhs"), f.get("grade","Grade 7"),
+                             f.get("discountKey"), f.get("discountRate"),
+                             esc_grantee=f.get("escGrantee", False))
 
         col_l, col_r = st.columns(2)
         with col_l:
@@ -536,7 +539,8 @@ def page_enroll():
             tid = gen_id()
             fdata_final = compute_fees(
                 f.get("level","jhs"), f.get("grade","Grade 7"),
-                f.get("discountKey"), f.get("discountRate")
+                f.get("discountKey"), f.get("discountRate"),
+                esc_grantee=f.get("escGrantee", False)
             )
             student = {
                 **f,
@@ -589,7 +593,8 @@ def page_student():
 
 def _student_status(s):
     st.title(f"Hello, {s.get('firstName','Student')}! 👋")
-    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"))
+    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
+                         esc_grantee=s.get("escGrantee", False))
     docs_list = [
         "PSA Birth Certificate","Form 138 / Report Card","Good Moral Certificate",
         "Certificate of Completion / Diploma","School Clearance (if applicable)",
@@ -658,7 +663,8 @@ def _student_docs(s):
 
 def _student_fees(s):
     st.title("💰 Fee Summary")
-    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"))
+    fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
+                         esc_grantee=s.get("escGrantee", False))
     paid  = float(s.get("paidAmount",0) or 0)
     total = fdata["total"]
     for k,v in fdata["lines"].items():
@@ -884,7 +890,8 @@ def _admin_students():
             with inner_tabs[0]:
                 st.markdown("#### 💰 Statement of Account")
                 fdata_view = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
-                                          s.get("discountKey"), s.get("discountRate"))
+                                          s.get("discountKey"), s.get("discountRate"),
+                                          esc_grantee=s.get("escGrantee", False))
 
                 # Fee breakdown table
                 import pandas as pd
