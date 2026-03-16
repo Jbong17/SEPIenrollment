@@ -496,7 +496,7 @@ def _student_status(s):
     st.markdown(f"""
     <div style='background:{bg};border-left:4px solid {col};border-radius:10px;padding:16px 20px;margin-bottom:16px'>
       <div style='font-size:11px;color:{col};text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px'>Enrollment Status</div>
-      <div style='font-size:22px;font-weight:700;color:#0a1628'>{LEVEL_LABEL.get(s.get('level',''),'—')} — {s.get('grade','—')}</div>
+      <div style='font-size:22px;font-weight:700;color:#1a1a2e'>{LEVEL_LABEL.get(s.get('level',''),'—')} — {s.get('grade','—')}</div>
       <div style='margin-top:8px;display:flex;gap:20px'>
         <span style='font-size:12px;color:{col}'>{ic} {status.replace('_',' ').title()}</span>
         <span style='font-size:12px;color:#64748b'>ID: {s.get('trackingId','—')}</span>
@@ -561,18 +561,18 @@ def _student_fees(s):
 def _student_generate(s):
     st.title("📄 Generate Official Documents")
     st.markdown(f"""
-    <div class='doc-card' style='border-color:#c2185b;background:#fce4ec;margin-bottom:16px'>
-      📋 Documents generated in <b>Long Bond Paper (8.5″ × 13″)</b> with <b>pink accent</b>
-      and <b>SEPI logo watermark</b>. Student record also saved as JSON for Cloudflare KV.
+    <div class='doc-card' style='border-color:#c2185b;background:#fce4ec;margin-bottom:16px;color:#1a1a2e'>
+      <span style='color:#c2185b'>📋</span> <span style='color:#333'>Documents generated in <b>Long Bond Paper (8.5″ × 13″)</b> with <b>pink accent</b>
+      and <b>SEPI logo watermark</b>. Student record also saved as JSON for Cloudflare KV.</span>
     </div>""", unsafe_allow_html=True)
 
     col_cf = st.columns(3)
     with col_cf[0]:
-        st.markdown('<div class="doc-card"><b>📋 Enrollment Form</b><br><small>Complete student registration with all sections</small></div>', unsafe_allow_html=True)
+        st.markdown('<div class="doc-card"><b style="color:#c2185b">📋 Enrollment Form</b><br><small style="color:#333">Complete student registration with all sections</small></div>', unsafe_allow_html=True)
     with col_cf[1]:
-        st.markdown('<div class="doc-card"><b>📝 Enrollment Contract</b><br><small>Legal agreement – 8 Articles</small></div>', unsafe_allow_html=True)
+        st.markdown('<div class="doc-card"><b style="color:#c2185b">📝 Enrollment Contract</b><br><small style="color:#333">Legal agreement – 8 Articles</small></div>', unsafe_allow_html=True)
     with col_cf[2]:
-        st.markdown('<div class="doc-card"><b>💰 Statement of Account</b><br><small>Official fee breakdown with Sections A, B, C</small></div>', unsafe_allow_html=True)
+        st.markdown('<div class="doc-card"><b style="color:#c2185b">💰 Statement of Account</b><br><small style="color:#333">Official fee breakdown with Sections A, B, C</small></div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
@@ -836,7 +836,7 @@ def page_soa_update():
       <div style='font-size:13px;font-weight:600;color:#c2185b;margin-bottom:8px'>
         {s.get("lastName","")}, {s.get("firstName","")} {s.get("middleName","")}
       </div>
-      <div style='font-size:12px;color:#64748b'>
+      <div style='font-size:12px;color:#555'>
         {llabel.get(s.get("level",""),"—")} — {s.get("grade","—")} &nbsp;|&nbsp;
         ID: {sid} &nbsp;|&nbsp; SY {s.get("schoolYear","2026-2027")}
       </div>
