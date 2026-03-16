@@ -133,6 +133,7 @@ if "pdf_form"    not in st.session_state: st.session_state.pdf_form    = None
 if "pdf_contract"not in st.session_state: st.session_state.pdf_contract= None
 if "pdf_soa"     not in st.session_state: st.session_state.pdf_soa     = None
 if "pdf_tid"     not in st.session_state: st.session_state.pdf_tid     = None
+if "soa_update_id" not in st.session_state: st.session_state.soa_update_id = None
 if "page"       not in st.session_state: st.session_state.page       = "login"
 if "user"       not in st.session_state: st.session_state.user       = None
 if "user_type"  not in st.session_state: st.session_state.user_type  = None
@@ -207,10 +208,13 @@ def page_login():
                 else:
                     st.error("Tracking ID not found. Please enroll first.")
             st.markdown("---")
-            if st.button("📋 New Enrollment", key="go_enroll"):
+            if st.button("📋 New Enrollment", key="go_enroll", use_container_width=True):
                 st.session_state.page      = "enroll"
                 st.session_state.form_data = {}
                 st.session_state.enroll_step = 1
+                st.rerun()
+            if st.button("💳 Update SOA / Payment", key="go_soa_update", use_container_width=True):
+                st.session_state.page = "soa_update"
                 st.rerun()
 
         with tab2:
@@ -596,7 +600,7 @@ def _student_generate(s):
             file_name=f"{tid}_enrollment_form.pdf",
             mime="application/pdf",
             use_container_width=True,
-            key="dl_form"
+            key=f"dl_form_{tid}"
         )
         c2.download_button(
             label="⬇ Enrollment Contract",
@@ -604,7 +608,7 @@ def _student_generate(s):
             file_name=f"{tid}_contract.pdf",
             mime="application/pdf",
             use_container_width=True,
-            key="dl_contract"
+            key=f"dl_contract_{tid}"
         )
         c3.download_button(
             label="⬇ Statement of Account",
@@ -612,7 +616,7 @@ def _student_generate(s):
             file_name=f"{tid}_soa.pdf",
             mime="application/pdf",
             use_container_width=True,
-            key="dl_soa"
+            key=f"dl_soa_{tid}"
         )
         # JSON record
         st.markdown("---")
@@ -624,7 +628,7 @@ def _student_generate(s):
             data=json_str,
             file_name=f"{tid}.json",
             mime="application/json",
-            key="dl_json"
+            key=f"dl_json_{tid}"
         )
 
 
@@ -658,7 +662,7 @@ def _admin_dashboard():
     c4.metric("Total Collected",    peso(sum(float(s.get("paidAmount",0) or 0) for s in ss.values())))
     st.markdown("---")
     st.markdown("**Enrollment by Level**")
-    cols = st.columns(4)
+    cols = st.columns(3)
     for i, (k,lbl) in enumerate(LEVEL_LABEL.items()):
         cnt = sum(1 for s in ss.values() if s.get("level")==k)
         cols[i].metric(lbl, cnt)
@@ -720,13 +724,13 @@ def _admin_students():
                 c1d, c2d, c3d = st.columns(3)
                 c1d.download_button("⬇ Enrollment Form", pdfs["form"],
                     f"{tid}_form.pdf", "application/pdf",
-                    use_container_width=True, key=f"dl_form_{tid}")
+                    use_container_width=True, key=f"adl_form_{tid}")
                 c2d.download_button("⬇ Contract", pdfs["contract"],
                     f"{tid}_contract.pdf", "application/pdf",
-                    use_container_width=True, key=f"dl_contract_{tid}")
+                    use_container_width=True, key=f"adl_contract_{tid}")
                 c3d.download_button("⬇ SOA", pdfs["soa"],
                     f"{tid}_soa.pdf", "application/pdf",
-                    use_container_width=True, key=f"dl_soa_{tid}")
+                    use_container_width=True, key=f"adl_soa_{tid}")
 
 def _admin_reports():
     ss = st.session_state.students
@@ -756,7 +760,7 @@ def _admin_reports():
     st.markdown("**Export All Records**")
     all_json = json.dumps(list(ss.values()), indent=2, default=str)
     st.download_button("⬇ Export JSON (All Students)", all_json,
-                       "sepi_all_students.json", "application/json")
+                       "sepi_all_students.json", "application/json", key="exp_reports")
 
 def _admin_cloud():
     KV_ID = "7d035b4c332449c5993651ab62478609"
@@ -782,7 +786,153 @@ def _admin_cloud():
     if ss:
         all_json = json.dumps(list(ss.values()), indent=2, default=str)
         st.download_button("⬇ Export All as JSON", all_json,
-                           "sepi_kv_export.json", "application/json")
+                           "sepi_kv_export.json", "application/json", key="exp_kv")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  SOA PAYMENT UPDATE PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+def page_soa_update():
+    with st.sidebar:
+        if LOGO_PATH and os.path.exists(LOGO_PATH):
+            st.image(LOGO_PATH, width=70)
+        st.markdown("<h3 style='color:#f48fb1;margin:0'>SEPI</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='color:rgba(255,255,255,.5);font-size:11px'>SOA Payment Update</p>", unsafe_allow_html=True)
+        st.markdown("---")
+        if st.button("← Back to Login"):
+            st.session_state.page = "login"; st.rerun()
+
+    st.title("💳 SOA Payment Update")
+    st.caption("Enter the student's Tracking ID to record a new payment or view payment history.")
+
+    tid_input = st.text_input("Tracking ID", placeholder="e.g. SEPI-ABC123", key="soa_tid_input")
+
+    if st.button("🔍 Look Up Student", key="soa_lookup", use_container_width=True):
+        s = st.session_state.students.get(tid_input.strip().upper())
+        if s:
+            st.session_state.soa_update_id = tid_input.strip().upper()
+        else:
+            st.error("Tracking ID not found.")
+            st.session_state.soa_update_id = None
+
+    sid = st.session_state.get("soa_update_id")
+    if not sid:
+        return
+
+    s = st.session_state.students.get(sid)
+    if not s:
+        st.error("Student record not found.")
+        return
+
+    # ── Student summary ───────────────────────────────────────────────────────
+    total    = float(s.get("totalFees", 0) or 0)
+    paid     = float(s.get("paidAmount", 0) or 0)
+    balance  = total - paid
+    llabel   = {"preschool": "Kinder/Preschool", "elementary": "Elementary", "jhs": "Junior High School"}
+
+    st.markdown(f"""
+    <div style='border:0.5px solid #f48fb1;border-radius:12px;padding:16px 20px;
+                background:var(--color-background-primary);margin-bottom:16px'>
+      <div style='font-size:13px;font-weight:600;color:#c2185b;margin-bottom:8px'>
+        {s.get("lastName","")}, {s.get("firstName","")} {s.get("middleName","")}
+      </div>
+      <div style='font-size:12px;color:#64748b'>
+        {llabel.get(s.get("level",""),"—")} — {s.get("grade","—")} &nbsp;|&nbsp;
+        ID: {sid} &nbsp;|&nbsp; SY {s.get("schoolYear","2026-2027")}
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Fees",   peso(total))
+    c2.metric("Total Paid",   peso(paid))
+    c3.metric("Balance",      peso(balance), delta=f"-{peso(balance)}" if balance > 0 else "Fully Paid")
+
+    # ── Payment history ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("**📋 Payment History**")
+    history = s.get("paymentHistory", [])
+    if history:
+        import pandas as pd
+        df = pd.DataFrame(history)
+        df.index = df.index + 1
+        st.dataframe(df, use_container_width=True, hide_index=False)
+    else:
+        st.info("No payment records yet.")
+
+    # ── Add new payment ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("**➕ Record New Payment**")
+
+    with st.form("payment_form", clear_on_submit=True):
+        pc1, pc2, pc3 = st.columns(3)
+        pay_amount = pc1.number_input("Payment Amount (PHP)", min_value=1.0,
+                                       max_value=float(max(balance, 1)),
+                                       value=min(1000.0, float(max(balance, 1))),
+                                       step=100.0, key="pay_amount_input")
+        pay_mode   = pc2.selectbox("Payment Mode",
+                                    ["Cash", "GCash", "Bank Transfer", "Check"],
+                                    key="pay_mode_input")
+        pay_date   = pc3.date_input("Payment Date",
+                                     value=datetime.date.today(),
+                                     key="pay_date_input")
+        pay_or     = st.text_input("OR Number (Official Receipt)", placeholder="Optional",
+                                    key="pay_or_input")
+        pay_note   = st.text_input("Remarks / Notes", placeholder="e.g. January installment",
+                                    key="pay_note_input")
+        submitted  = st.form_submit_button("💾 Save Payment", use_container_width=True)
+
+        if submitted:
+            if pay_amount <= 0:
+                st.error("Payment amount must be greater than zero.")
+            elif pay_amount > balance + 0.01:
+                st.error(f"Amount exceeds balance of {peso(balance)}.")
+            else:
+                new_record = {
+                    "Date":    str(pay_date),
+                    "Amount":  f"PHP {pay_amount:,.2f}",
+                    "Mode":    pay_mode,
+                    "OR No.":  pay_or or "—",
+                    "Remarks": pay_note or "—",
+                }
+                if "paymentHistory" not in st.session_state.students[sid]:
+                    st.session_state.students[sid]["paymentHistory"] = []
+                st.session_state.students[sid]["paymentHistory"].append(new_record)
+                new_paid = paid + pay_amount
+                st.session_state.students[sid]["paidAmount"] = new_paid
+                # Update current student session if logged in
+                if (st.session_state.get("user") and
+                        st.session_state.user.get("trackingId") == sid):
+                    st.session_state.user["paidAmount"] = new_paid
+                    st.session_state.user["paymentHistory"] = st.session_state.students[sid]["paymentHistory"]
+                st.success(f"✅ Payment of {peso(pay_amount)} recorded successfully!")
+                st.rerun()
+
+    # ── Generate updated SOA ──────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("**📄 Download Updated SOA**")
+    st.caption("Generates an updated Statement of Account reflecting all payments recorded.")
+
+    soa_key = f"updated_soa_{sid}"
+    if st.button("🔄 Generate Updated SOA PDF", key=f"gen_updated_soa_{sid}",
+                 use_container_width=True):
+        with st.spinner("Generating updated SOA…"):
+            try:
+                updated_student = st.session_state.students[sid]
+                st.session_state[soa_key] = build_soa(updated_student)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    if st.session_state.get(soa_key):
+        st.download_button(
+            label=f"⬇ Download Updated SOA — {sid}",
+            data=st.session_state[soa_key],
+            file_name=f"{sid}_updated_soa.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key=f"dl_updated_soa_{sid}"
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ROUTER
@@ -796,6 +946,8 @@ def main():
         page_student()
     elif st.session_state.page == "admin":
         page_admin()
+    elif st.session_state.page == "soa_update":
+        page_soa_update()
 
 if __name__ == "__main__":
     main()
