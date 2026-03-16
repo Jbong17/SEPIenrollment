@@ -219,15 +219,7 @@ def page_login():
                 else:
                     st.error("Tracking ID not found. Please enroll first.")
             st.markdown("---")
-            if st.button("📋 New Enrollment", key="go_enroll", use_container_width=True):
-                st.session_state.page      = "enroll"
-                st.session_state.form_data = {}
-                st.session_state.enroll_step = 1
-                st.session_state.pop('discount_preview',None)
-                st.rerun()
-            if st.button("💳 Update SOA / Payment", key="go_soa_update", use_container_width=True):
-                st.session_state.page = "soa_update"
-                st.rerun()
+            st.caption("💡 For new enrollment or SOA updates, please contact the school registrar or log in via the Admin Portal.")
 
         with tab2:
             st.markdown("#### Admin Login")
@@ -646,15 +638,19 @@ def _student_docs(s):
     pending   = [d for d in docs_list if not docs_state.get(d)]
     st.progress(len(submitted)/len(docs_list))
     st.caption(f"{len(submitted)} of {len(docs_list)} submitted")
-    c1,c2 = st.columns(2)
+    c1, c2 = st.columns(2)
     with c1:
         st.markdown("**✅ Submitted**")
         for d in submitted:
-            st.markdown(f'<div class="doc-card generated">✓ {d}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="background:#fce4ec;border:1.5px solid #c2185b;border-radius:10px;padding:10px 14px;margin:5px 0;color:#7b003a;font-size:13px;font-weight:600"><span style="color:#c2185b">✓</span> &nbsp;{d}</div>',
+                unsafe_allow_html=True)
     with c2:
         st.markdown("**⏳ Pending**")
         for d in pending:
-            st.markdown(f'<div class="doc-card">○ {d}</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="background:#f8f9fa;border:1.5px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin:5px 0;color:#4a5568;font-size:13px"><span style="color:#94a3b8">○</span> &nbsp;{d}</div>',
+                unsafe_allow_html=True)
 
 def _student_fees(s):
     st.title("💰 Fee Summary")
@@ -761,6 +757,17 @@ def page_admin():
         st.markdown("---")
         tab = st.radio("Navigate", ["📊 Dashboard","👥 Students","🗂️ Inventory","📈 Reports","☁️ Cloudflare KV","⚙️ Settings"], label_visibility="collapsed")
         st.markdown("---")
+        st.markdown("<p style='color:rgba(255,255,255,.5);font-size:11px;text-transform:uppercase;letter-spacing:.06em'>Quick Actions</p>", unsafe_allow_html=True)
+        if st.button("📋 New Enrollment", key="admin_go_enroll", use_container_width=True):
+            st.session_state.page = "enroll"
+            st.session_state.form_data = {}
+            st.session_state.enroll_step = 1
+            st.session_state.pop("discount_preview", None)
+            st.rerun()
+        if st.button("💳 Update SOA / Payment", key="admin_go_soa", use_container_width=True):
+            st.session_state.page = "soa_update"
+            st.rerun()
+        st.markdown("---")
         if st.button("🚪 Logout"):
             logout(); st.rerun()
 
@@ -809,47 +816,192 @@ def _admin_students():
         return
 
     for s in filtered:
-        with st.expander(f"**{s.get('lastName','')}, {s.get('firstName','')}**  ·  {s.get('trackingId','')}  ·  {s.get('grade','—')}"):
-            c1,c2,c3 = st.columns(3)
-            c1.markdown(f"**Level:** {LEVEL_LABEL.get(s.get('level',''),'—')}")
-            c2.markdown(f"**Status:** {s.get('status','pending').replace('_',' ').title()}")
-            c3.markdown(f"**Balance:** {peso(float(s.get('totalFees',0) or 0)-float(s.get('paidAmount',0) or 0))}")
+        tid    = s["trackingId"]
+        total  = float(s.get("totalFees",0) or 0)
+        paid   = float(s.get("paidAmount",0) or 0)
+        bal    = total - paid
+        status = s.get("status","pending")
+        status_icons = {"pending":"🟡","under_review":"🔵","approved":"🟢","rejected":"🔴"}
+        ic = status_icons.get(status,"🟡")
 
-            new_status = st.selectbox("Update Status",
-                ["pending","under_review","approved","rejected"],
-                index=["pending","under_review","approved","rejected"].index(s.get("status","pending")),
-                key=f"status_{s['trackingId']}")
-            if st.button("Update", key=f"upd_{s['trackingId']}"):
-                st.session_state.students[s["trackingId"]]["status"] = new_status
-                st.success("Status updated."); st.rerun()
+        with st.expander(
+            f"{ic} **{s.get('lastName','')}, {s.get('firstName','')}** "
+            f"·  {tid}  ·  {s.get('grade','—')}  "
+            f"·  Balance: {peso(bal)}"
+        ):
+            # ── Student Summary ───────────────────────────────────────────────
+            sc1,sc2,sc3,sc4 = st.columns(4)
+            sc1.metric("Total Fees",   peso(total))
+            sc2.metric("Amount Paid",  peso(paid))
+            sc3.metric("Balance",      peso(bal))
+            sc4.metric("Status",       status.replace("_"," ").title())
 
-            # Store per-student PDFs in session state so download buttons persist
-            gen_key = f"admin_pdf_{s['trackingId']}"
-            if st.button("📄 Generate Docs", key=f"gen_{s['trackingId']}"):
-                with st.spinner("Generating…"):
-                    try:
-                        st.session_state[gen_key] = {
-                            "form":     build_enrollment_form(s),
-                            "contract": build_contract(s),
-                            "soa":      build_soa(s),
-                        }
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            inner_tabs = st.tabs(["📊 SOA & Payments", "📋 Student Info", "⚙️ Actions"])
 
-            if st.session_state.get(gen_key):
-                pdfs = st.session_state[gen_key]
-                tid  = s["trackingId"]
-                c1d, c2d, c3d = st.columns(3)
-                c1d.download_button("⬇ Enrollment Form", pdfs["form"],
-                    f"{tid}_form.pdf", "application/pdf",
-                    use_container_width=True, key=f"adl_form_{tid}")
-                c2d.download_button("⬇ Contract", pdfs["contract"],
-                    f"{tid}_contract.pdf", "application/pdf",
-                    use_container_width=True, key=f"adl_contract_{tid}")
-                c3d.download_button("⬇ SOA", pdfs["soa"],
-                    f"{tid}_soa.pdf", "application/pdf",
-                    use_container_width=True, key=f"adl_soa_{tid}")
+            # ── TAB 1: Inline SOA Viewer ──────────────────────────────────────
+            with inner_tabs[0]:
+                st.markdown("#### 💰 Statement of Account")
+                fdata_view = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
+                                          s.get("discountKey"), s.get("discountRate"))
+
+                # Fee breakdown table
+                import pandas as pd
+                fee_rows = []
+                disc_info_v = s.get("discountInfo") or fdata_view.get("discount")
+                for k, v in fdata_view["lines"].items():
+                    if k == "Tuition Fee" and disc_info_v:
+                        d_base = disc_info_v.get("base_tuition", v)
+                        d_amt  = disc_info_v.get("amount", 0)
+                        d_rate = disc_info_v.get("rate", 0)
+                        fee_rows.append({"Particular": "Tuition Fee (Gross)", "Amount": f"₱{d_base:,.2f}", "Note": ""})
+                        fee_rows.append({"Particular": f"  Discount: {disc_info_v.get('label','')} ({d_rate}%)", "Amount": f"(₱{d_amt:,.2f})", "Note": "Applied"})
+                        fee_rows.append({"Particular": "Tuition Fee (Net)", "Amount": f"₱{v:,.2f}", "Note": ""})
+                    else:
+                        fee_rows.append({"Particular": k, "Amount": f"₱{v:,.2f}", "Note": ""})
+                fee_rows.append({"Particular": "TOTAL SCHOOL FEES", "Amount": f"₱{fdata_view['total']:,.2f}", "Note": ""})
+
+                fee_df = pd.DataFrame(fee_rows)
+                st.dataframe(fee_df, use_container_width=True, hide_index=True,
+                    column_config={
+                        "Particular": st.column_config.TextColumn(width="large"),
+                        "Amount":     st.column_config.TextColumn(width="medium"),
+                        "Note":       st.column_config.TextColumn(width="small"),
+                    })
+
+                # Summary row
+                ps1, ps2, ps3, ps4 = st.columns(4)
+                ps1.metric("Total Assessed",  peso(fdata_view["total"]))
+                ps2.metric("Discount Applied",peso(disc_info_v.get("amount",0) if disc_info_v else 0))
+                ps3.metric("Total Paid",       peso(paid))
+                ps4.metric("Outstanding",      peso(bal),
+                           delta=f"-{peso(bal)}" if bal > 0 else "✅ Fully Paid",
+                           delta_color="inverse" if bal > 0 else "normal")
+
+                # ── Payment History ───────────────────────────────────────────
+                st.markdown("#### 📋 Payment History")
+                history = s.get("paymentHistory", [])
+                if history:
+                    hist_df = pd.DataFrame(history)
+                    hist_df.index = range(1, len(hist_df)+1)
+                    st.dataframe(hist_df, use_container_width=True,
+                        column_config={
+                            "Date":    st.column_config.TextColumn(width="small"),
+                            "Amount":  st.column_config.TextColumn(width="medium"),
+                            "Mode":    st.column_config.TextColumn(width="small"),
+                            "OR No.":  st.column_config.TextColumn(width="medium"),
+                            "Remarks": st.column_config.TextColumn(width="large"),
+                        })
+                    # Running balance
+                    running = fdata_view["total"]
+                    rb_rows = []
+                    for h in history:
+                        amt_str = str(h.get("Amount","0")).replace("PHP","").replace("₱","").replace(",","").strip()
+                        try:
+                            amt = float(amt_str)
+                        except Exception:
+                            amt = 0
+                        running -= amt
+                        rb_rows.append({"Payment": h.get("Amount",""), "After Payment Balance": f"₱{max(running,0):,.2f}"})
+                    st.markdown("**Running Balance**")
+                    st.dataframe(pd.DataFrame(rb_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No payments recorded yet.")
+
+                # ── Quick payment entry ───────────────────────────────────────
+                st.markdown("#### ➕ Record Payment")
+                with st.form(f"quick_pay_{tid}", clear_on_submit=True):
+                    qp1, qp2, qp3 = st.columns(3)
+                    qp_amt  = qp1.number_input("Amount (PHP)", min_value=1.0,
+                                                max_value=float(max(bal,1)),
+                                                value=min(1000.0, float(max(bal,1))),
+                                                step=100.0, key=f"qpa_{tid}")
+                    qp_mode = qp2.selectbox("Mode", ["Cash","GCash","Bank Transfer","Check"],
+                                             key=f"qpm_{tid}")
+                    qp_date = qp3.date_input("Date", value=datetime.date.today(),
+                                              key=f"qpd_{tid}")
+                    qp_or   = st.text_input("OR Number", placeholder="Optional", key=f"qpo_{tid}")
+                    qp_note = st.text_input("Remarks", placeholder="e.g. June installment",
+                                             key=f"qpn_{tid}")
+                    qp_save = st.form_submit_button("💾 Save Payment", use_container_width=True)
+                    if qp_save:
+                        if qp_amt > bal + 0.01:
+                            st.error(f"Exceeds balance of {peso(bal)}")
+                        else:
+                            new_rec = {"Date": str(qp_date), "Amount": f"PHP {qp_amt:,.2f}",
+                                       "Mode": qp_mode, "OR No.": qp_or or "—",
+                                       "Remarks": qp_note or "—"}
+                            if "paymentHistory" not in st.session_state.students[tid]:
+                                st.session_state.students[tid]["paymentHistory"] = []
+                            st.session_state.students[tid]["paymentHistory"].append(new_rec)
+                            st.session_state.students[tid]["paidAmount"] = paid + qp_amt
+                            if (st.session_state.get("user") and
+                                    st.session_state.user.get("trackingId") == tid):
+                                st.session_state.user["paidAmount"] = paid + qp_amt
+                            st.success(f"✅ Payment of {peso(qp_amt)} saved!"); st.rerun()
+
+            # ── TAB 2: Student Info ───────────────────────────────────────────
+            with inner_tabs[1]:
+                si1, si2 = st.columns(2)
+                with si1:
+                    st.markdown("**Personal**")
+                    for lbl, val in [
+                        ("Name", f"{s.get('lastName','')}, {s.get('firstName','')} {s.get('middleName','')}"),
+                        ("Gender",    (s.get("gender","") or "").capitalize()),
+                        ("Birthdate", s.get("birthDate","")),
+                        ("Address",   f"{s.get('address','')} {s.get('barangay','')} {s.get('city','')}".strip()),
+                        ("Mobile",    s.get("phone","")),
+                        ("LRN",       s.get("lrn","") or "—"),
+                    ]:
+                        st.markdown(f"**{lbl}:** {val or '—'}")
+                with si2:
+                    st.markdown("**Family**")
+                    for lbl, val in [
+                        ("Father", s.get("fatherName","")),
+                        ("Mother", s.get("motherName","")),
+                        ("Guardian", s.get("guardianName","")),
+                        ("Prev. School", s.get("previousSchool","")),
+                        ("ESC Grantee", "Yes" if s.get("escGrantee") else "No"),
+                        ("Discount", (s.get("discountInfo") or {}).get("label","None")),
+                    ]:
+                        st.markdown(f"**{lbl}:** {val or '—'}")
+
+            # ── TAB 3: Actions ────────────────────────────────────────────────
+            with inner_tabs[2]:
+                st.markdown("**Update Enrollment Status**")
+                new_status = st.selectbox("Status",
+                    ["pending","under_review","approved","rejected"],
+                    index=["pending","under_review","approved","rejected"].index(s.get("status","pending")),
+                    key=f"status_{tid}")
+                if st.button("✅ Update Status", key=f"upd_{tid}"):
+                    st.session_state.students[tid]["status"] = new_status
+                    st.success("Status updated."); st.rerun()
+
+                st.markdown("---")
+                st.markdown("**Generate PDF Documents**")
+                gen_key = f"admin_pdf_{tid}"
+                if st.button("📄 Generate All Docs", key=f"gen_{tid}", use_container_width=True):
+                    with st.spinner("Generating…"):
+                        try:
+                            st.session_state[gen_key] = {
+                                "form":     build_enrollment_form(s),
+                                "contract": build_contract(s),
+                                "soa":      build_soa(s),
+                            }
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+                if st.session_state.get(gen_key):
+                    pdfs = st.session_state[gen_key]
+                    c1d, c2d, c3d = st.columns(3)
+                    c1d.download_button("⬇ Enrollment Form", pdfs["form"],
+                        f"{tid}_form.pdf", "application/pdf",
+                        use_container_width=True, key=f"adl_form_{tid}")
+                    c2d.download_button("⬇ Contract", pdfs["contract"],
+                        f"{tid}_contract.pdf", "application/pdf",
+                        use_container_width=True, key=f"adl_contract_{tid}")
+                    c3d.download_button("⬇ SOA", pdfs["soa"],
+                        f"{tid}_soa.pdf", "application/pdf",
+                        use_container_width=True, key=f"adl_soa_{tid}")
 
 def _admin_reports():
     ss = st.session_state.students
