@@ -128,7 +128,17 @@ div[data-testid="stExpander"] { border: 1px solid #fce4ec !important; border-rad
 """, unsafe_allow_html=True)
 
 # ── Session state ──────────────────────────────────────────────────────────────
-if "students"   not in st.session_state: st.session_state.students   = {}
+if "students"      not in st.session_state: st.session_state.students      = {}
+if "admin_password" not in st.session_state:
+    # Load from Streamlit secrets if available, else use default
+    try:
+        st.session_state.admin_password = st.secrets["ADMIN_PASSWORD"]
+    except Exception:
+        st.session_state.admin_password = "sepi2024"
+if "otp_code"      not in st.session_state: st.session_state.otp_code      = None
+if "otp_expiry"    not in st.session_state: st.session_state.otp_expiry    = None
+if "otp_sent_to"   not in st.session_state: st.session_state.otp_sent_to   = None
+if "otp_verified"  not in st.session_state: st.session_state.otp_verified  = False
 if "pdf_form"    not in st.session_state: st.session_state.pdf_form    = None
 if "pdf_contract"not in st.session_state: st.session_state.pdf_contract= None
 if "pdf_soa"     not in st.session_state: st.session_state.pdf_soa     = None
@@ -222,7 +232,7 @@ def page_login():
             un = st.text_input("Username", key="admin_un")
             pw = st.text_input("Password", type="password", key="admin_pw")
             if st.button("Sign In", key="admin_login"):
-                if un == "admin" and pw == "sepi2024":
+                if un == "admin" and pw == st.session_state.admin_password:
                     st.session_state.user_type = "admin"
                     st.session_state.page      = "admin"
                     st.rerun()
@@ -642,15 +652,17 @@ def page_admin():
         st.markdown("<h3 style='color:#f48fb1;margin:0'>SEPI Admin</h3>", unsafe_allow_html=True)
         st.markdown("<p style='color:rgba(255,255,255,.4);font-size:11px'>Administration Panel</p>", unsafe_allow_html=True)
         st.markdown("---")
-        tab = st.radio("Navigate", ["📊 Dashboard","👥 Students","📈 Reports","☁️ Cloudflare KV"], label_visibility="collapsed")
+        tab = st.radio("Navigate", ["📊 Dashboard","👥 Students","🗂️ Inventory","📈 Reports","☁️ Cloudflare KV","⚙️ Settings"], label_visibility="collapsed")
         st.markdown("---")
         if st.button("🚪 Logout"):
             logout(); st.rerun()
 
     if "📊" in tab:  _admin_dashboard()
     elif "👥" in tab: _admin_students()
+    elif "🗂️" in tab: _admin_inventory()
     elif "📈" in tab: _admin_reports()
     elif "☁️" in tab: _admin_cloud()
+    elif "⚙️" in tab: _admin_settings()
 
 def _admin_dashboard():
     ss = st.session_state.students
@@ -787,6 +799,500 @@ def _admin_cloud():
         all_json = json.dumps(list(ss.values()), indent=2, default=str)
         st.download_button("⬇ Export All as JSON", all_json,
                            "sepi_kv_export.json", "application/json", key="exp_kv")
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  STUDENT INVENTORY PER GRADE LEVEL
+# ══════════════════════════════════════════════════════════════════════════════
+def _admin_inventory():
+    import pandas as pd
+    import io as _io
+
+    ss   = st.session_state.students
+    sy   = SCHOOL_YEAR
+
+    st.title("🗂️ Student Inventory")
+    st.caption(f"School Year {sy}  ·  Complete student roster organized by grade level")
+
+    if not ss:
+        st.info("No enrolled students yet.")
+        return
+
+    # ── Build master list ─────────────────────────────────────────────────────
+    all_students = list(ss.values())
+
+    STATUS_COLOR = {
+        "pending":      ("🟡", "#fef3c7", "#92400e"),
+        "under_review": ("🔵", "#dbeafe", "#1e40af"),
+        "approved":     ("🟢", "#dcfce7", "#14532d"),
+        "rejected":     ("🔴", "#fee2e2", "#7f1d1d"),
+    }
+
+    LEVEL_ORDER = ["preschool","elementary","jhs"]
+    LEVEL_LABEL_MAP = {
+        "preschool":  "Kinder / Preschool",
+        "elementary": "Elementary",
+        "jhs":        "Junior High School",
+    }
+    GRADE_ORDER = {
+        "Nursery":0,"Kinder 1":1,"Kinder 2":2,
+        "Grade 1":3,"Grade 2":4,"Grade 3":5,"Grade 4":6,"Grade 5":7,"Grade 6":8,
+        "Grade 7":9,"Grade 8":10,"Grade 9":11,"Grade 10":12,
+    }
+
+    # ── Summary stat row ──────────────────────────────────────────────────────
+    c1,c2,c3,c4,c5 = st.columns(5)
+    c1.metric("Total Students", len(all_students))
+    c2.metric("Kinder/Preschool", sum(1 for s in all_students if s.get("level")=="preschool"))
+    c3.metric("Elementary",       sum(1 for s in all_students if s.get("level")=="elementary"))
+    c4.metric("Junior High",      sum(1 for s in all_students if s.get("level")=="jhs"))
+    approved = sum(1 for s in all_students if s.get("status")=="approved")
+    c5.metric("Approved", f"{approved}/{len(all_students)}")
+
+    st.markdown("---")
+
+    # ── Filters row ───────────────────────────────────────────────────────────
+    fc1, fc2, fc3, fc4 = st.columns([2,1,1,1])
+    search_q  = fc1.text_input("Search student", placeholder="Name or Tracking ID…",
+                                label_visibility="collapsed", key="inv_search")
+    filt_stat = fc2.selectbox("Status", ["All","pending","under_review","approved","rejected"],
+                               label_visibility="collapsed", key="inv_status")
+    filt_sy   = fc3.selectbox("School Year", ["All", sy],
+                               label_visibility="collapsed", key="inv_sy")
+    export_fmt= fc4.selectbox("Export as", ["Excel (.xlsx)","CSV (.csv)"],
+                               label_visibility="collapsed", key="inv_export_fmt")
+
+    # ── Apply filters ─────────────────────────────────────────────────────────
+    filtered = all_students[:]
+    if search_q:
+        q = search_q.lower()
+        filtered = [s for s in filtered if
+                    q in f"{s.get('firstName','')} {s.get('lastName','')}".lower()
+                    or q in s.get("trackingId","").lower()
+                    or q in s.get("grade","").lower()]
+    if filt_stat != "All":
+        filtered = [s for s in filtered if s.get("status")==filt_stat]
+    if filt_sy != "All":
+        filtered = [s for s in filtered if s.get("schoolYear")==filt_sy]
+
+    # ── Build master DataFrame for export ─────────────────────────────────────
+    def _to_row(s):
+        paid = float(s.get("paidAmount",0) or 0)
+        total= float(s.get("totalFees",0) or 0)
+        docs_list = [
+            "PSA Birth Certificate","Form 138 / Report Card","Good Moral Certificate",
+            "Certificate of Completion / Diploma","School Clearance (if applicable)",
+            "2x2 ID Pictures (6 pcs)","Medical Certificate",
+        ]
+        docs_state = s.get("docs",{})
+        docs_submitted = sum(1 for d in docs_list if docs_state.get(d))
+        return {
+            "Tracking ID":        s.get("trackingId",""),
+            "Last Name":          s.get("lastName",""),
+            "First Name":         s.get("firstName",""),
+            "Middle Name":        s.get("middleName",""),
+            "Gender":             (s.get("gender","") or "").capitalize(),
+            "Date of Birth":      s.get("birthDate",""),
+            "Level":              LEVEL_LABEL_MAP.get(s.get("level",""),"—"),
+            "Grade":              s.get("grade",""),
+            "School Year":        s.get("schoolYear",""),
+            "LRN":                s.get("lrn",""),
+            "Transfer Status":    s.get("transferStatus",""),
+            "Enrollment Status":  (s.get("status","") or "").replace("_"," ").title(),
+            "Mobile":             s.get("phone",""),
+            "Email":              s.get("email",""),
+            "Father Name":        s.get("fatherName",""),
+            "Mother Name":        s.get("motherName",""),
+            "Address":            f"{s.get('address','')} {s.get('barangay','')} {s.get('city','')}".strip(),
+            "Total Fees":         total,
+            "Amount Paid":        paid,
+            "Balance":            total - paid,
+            "Docs Submitted":     f"{docs_submitted}/{len(docs_list)}",
+            "Previous School":    s.get("previousSchool",""),
+            "Enrolled On":        s.get("enrolledAt","")[:10] if s.get("enrolledAt") else "",
+        }
+
+    master_df = pd.DataFrame([_to_row(s) for s in filtered])
+
+    # ── Export button ─────────────────────────────────────────────────────────
+    if not master_df.empty:
+        if "Excel" in export_fmt:
+            xls_buf = _io.BytesIO()
+            with pd.ExcelWriter(xls_buf, engine="openpyxl") as writer:
+                # Master sheet
+                master_df.to_excel(writer, sheet_name="All Students", index=False)
+                # One sheet per grade level
+                for lvl_key in LEVEL_ORDER:
+                    lvl_students = [s for s in filtered if s.get("level")==lvl_key]
+                    if not lvl_students:
+                        continue
+                    lvl_df = pd.DataFrame([_to_row(s) for s in lvl_students])
+                    sheet_name = {"preschool":"Kinder-Preschool",
+                                  "elementary":"Elementary","jhs":"Junior High"}[lvl_key]
+                    lvl_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    # Per-grade sheets inside each level
+                    grades_in_lvl = sorted(
+                        set(s.get("grade","") for s in lvl_students),
+                        key=lambda g: GRADE_ORDER.get(g,99)
+                    )
+                    for grade in grades_in_lvl:
+                        g_students = [s for s in lvl_students if s.get("grade")==grade]
+                        g_df = pd.DataFrame([_to_row(s) for s in g_students])
+                        g_sheet = grade.replace(" ","")[:31]
+                        g_df.to_excel(writer, sheet_name=g_sheet, index=False)
+            xls_buf.seek(0)
+            st.download_button(
+                "⬇ Export Full Inventory (Excel)",
+                xls_buf.getvalue(),
+                f"SEPI_Student_Inventory_{sy}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="inv_export_xlsx", use_container_width=True
+            )
+        else:
+            csv_str = master_df.to_csv(index=False)
+            st.download_button(
+                "⬇ Export Full Inventory (CSV)",
+                csv_str,
+                f"SEPI_Student_Inventory_{sy}.csv",
+                "text/csv",
+                key="inv_export_csv", use_container_width=True
+            )
+
+    st.markdown("---")
+
+    # ── Grade-level tabs ───────────────────────────────────────────────────────
+    level_tabs = st.tabs(["📋 All Levels",
+                          "🌸 Kinder / Preschool",
+                          "📚 Elementary",
+                          "🏫 Junior High School"])
+
+    def _render_grade_table(students_in_level, level_key):
+        if not students_in_level:
+            st.info("No students in this level.")
+            return
+
+        # Get sorted unique grades
+        grades = sorted(
+            set(s.get("grade","") for s in students_in_level),
+            key=lambda g: GRADE_ORDER.get(g, 99)
+        )
+
+        for grade in grades:
+            grade_students = [s for s in students_in_level if s.get("grade")==grade]
+            if not grade_students:
+                continue
+
+            approved_g  = sum(1 for s in grade_students if s.get("status")=="approved")
+            pending_g   = sum(1 for s in grade_students if s.get("status")=="pending")
+            total_bal_g = sum(float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0)
+                              for s in grade_students)
+
+            with st.expander(
+                f"**{grade}** — {len(grade_students)} student{'s' if len(grade_students)!=1 else ''}  "
+                f"| ✅ {approved_g} approved  | ⏳ {pending_g} pending  "
+                f"| Outstanding: ₱{total_bal_g:,.2f}",
+                expanded=(len(grades) == 1)
+            ):
+                # Grade-level summary cards
+                gs1,gs2,gs3,gs4 = st.columns(4)
+                gs1.metric("Enrolled",  len(grade_students))
+                gs2.metric("Approved",  approved_g)
+                gs3.metric("Pending",   pending_g)
+                gs4.metric("Outstanding Balance", f"₱{total_bal_g:,.2f}")
+
+                # Student roster table
+                rows = []
+                for i, s in enumerate(sorted(grade_students,
+                                             key=lambda x: x.get("lastName","").lower()), 1):
+                    paid  = float(s.get("paidAmount",0) or 0)
+                    total = float(s.get("totalFees",0) or 0)
+                    bal   = total - paid
+                    status= s.get("status","pending")
+                    ic, bg, col = STATUS_COLOR.get(status, ("🟡","#fef3c7","#92400e"))
+                    docs_list = [
+                        "PSA Birth Certificate","Form 138 / Report Card","Good Moral Certificate",
+                        "Certificate of Completion / Diploma","School Clearance (if applicable)",
+                        "2x2 ID Pictures (6 pcs)","Medical Certificate",
+                    ]
+                    docs_state = s.get("docs",{})
+                    docs_done  = sum(1 for d in docs_list if docs_state.get(d))
+                    rows.append({
+                        "#":             i,
+                        "Tracking ID":   s.get("trackingId",""),
+                        "Last Name":     s.get("lastName",""),
+                        "First Name":    s.get("firstName",""),
+                        "M.I.":          (s.get("middleName","") or " ")[:1] + ".",
+                        "Gender":        (s.get("gender","") or "")[:1].upper(),
+                        "LRN":           s.get("lrn","") or "—",
+                        "Transfer":      (s.get("transferStatus","") or "")[:3],
+                        "Status":        status.replace("_"," ").title(),
+                        "Docs":          f"{docs_done}/{len(docs_list)}",
+                        "Total Fees":    f"₱{total:,.2f}",
+                        "Paid":          f"₱{paid:,.2f}",
+                        "Balance":       f"₱{bal:,.2f}",
+                        "Contact":       s.get("phone","") or "—",
+                    })
+
+                df = pd.DataFrame(rows)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "#":           st.column_config.NumberColumn(width="small"),
+                        "Tracking ID": st.column_config.TextColumn(width="medium"),
+                        "Last Name":   st.column_config.TextColumn(width="medium"),
+                        "First Name":  st.column_config.TextColumn(width="medium"),
+                        "M.I.":        st.column_config.TextColumn(width="small"),
+                        "Gender":      st.column_config.TextColumn(width="small"),
+                        "LRN":         st.column_config.TextColumn(width="medium"),
+                        "Transfer":    st.column_config.TextColumn(width="small"),
+                        "Status":      st.column_config.TextColumn(width="medium"),
+                        "Docs":        st.column_config.TextColumn(width="small"),
+                        "Total Fees":  st.column_config.TextColumn(width="medium"),
+                        "Paid":        st.column_config.TextColumn(width="medium"),
+                        "Balance":     st.column_config.TextColumn(width="medium"),
+                        "Contact":     st.column_config.TextColumn(width="medium"),
+                    }
+                )
+
+                # Per-grade export
+                g_df = pd.DataFrame([_to_row(s) for s in grade_students])
+                g_csv = g_df.to_csv(index=False)
+                st.download_button(
+                    f"⬇ Export {grade} roster (CSV)",
+                    g_csv,
+                    f"SEPI_{grade.replace(' ','_')}_{sy}.csv",
+                    "text/csv",
+                    key=f"inv_csv_{level_key}_{grade.replace(' ','_')}",
+                    use_container_width=False,
+                )
+
+    # Tab 0: All Levels
+    with level_tabs[0]:
+        _render_grade_table(filtered, "all")
+
+    # Tab 1: Preschool
+    with level_tabs[1]:
+        ps = [s for s in filtered if s.get("level")=="preschool"]
+        st.caption(f"{len(ps)} student{'s' if len(ps)!=1 else ''} enrolled")
+        _render_grade_table(ps, "preschool")
+
+    # Tab 2: Elementary
+    with level_tabs[2]:
+        el = [s for s in filtered if s.get("level")=="elementary"]
+        st.caption(f"{len(el)} student{'s' if len(el)!=1 else ''} enrolled")
+        _render_grade_table(el, "elementary")
+
+    # Tab 3: JHS
+    with level_tabs[3]:
+        jh = [s for s in filtered if s.get("level")=="jhs"]
+        st.caption(f"{len(jh)} student{'s' if len(jh)!=1 else ''} enrolled")
+        _render_grade_table(jh, "jhs")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  ADMIN SETTINGS — Change Password with OTP
+# ══════════════════════════════════════════════════════════════════════════════
+import random, smtplib, hashlib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def _send_otp_email(otp: str, sender_email: str, sender_app_password: str) -> bool:
+    """Send OTP to sepiregistrar@gmail.com via Gmail SMTP."""
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"SEPI Admin Portal — Password Change OTP: {otp}"
+        msg["From"]    = sender_email
+        msg["To"]      = sender_email   # send to school email itself
+
+        html = f"""
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;
+                    border:1px solid #f48fb1;border-radius:12px;overflow:hidden">
+          <div style="background:#c2185b;padding:18px 24px">
+            <h2 style="color:#fff;margin:0;font-size:18px">SEPI Enrollment System</h2>
+            <p style="color:rgba(255,255,255,.8);margin:4px 0 0;font-size:12px">
+              School of Everlasting Pearl, Inc.
+            </p>
+          </div>
+          <div style="padding:24px">
+            <p style="color:#333;font-size:14px">A password change was requested for the Admin Portal.</p>
+            <p style="color:#333;font-size:14px">Your One-Time Password (OTP) is:</p>
+            <div style="background:#fce4ec;border:2px solid #c2185b;border-radius:10px;
+                        text-align:center;padding:20px;margin:16px 0">
+              <span style="font-size:36px;font-weight:700;letter-spacing:10px;
+                           color:#c2185b;font-family:monospace">{otp}</span>
+            </div>
+            <p style="color:#666;font-size:12px">
+              This OTP is valid for <b>5 minutes</b>.<br>
+              If you did not request this, please ignore this email.
+            </p>
+          </div>
+          <div style="background:#f8f9fa;padding:12px 24px;text-align:center">
+            <p style="color:#94a3b8;font-size:11px;margin:0">
+              SEPI Enrollment System · sepiregistrar@gmail.com
+            </p>
+          </div>
+        </div>"""
+
+        msg.attach(MIMEText(html, "html"))
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, sender_app_password)
+            server.sendmail(sender_email, sender_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.session_state["_email_error"] = str(e)
+        return False
+
+
+def _admin_settings():
+    st.title("⚙️ Admin Settings")
+    st.caption("Change the admin portal password using OTP verification sent to the school email.")
+
+    # ── Gmail SMTP Configuration ──────────────────────────────────────────────
+    with st.expander("📧 Email Configuration (Gmail SMTP)", expanded=False):
+        st.markdown("""
+        To enable OTP email delivery, you need a **Gmail App Password** for `sepiregistrar@gmail.com`.
+
+        **One-time setup steps:**
+        1. Go to [myaccount.google.com](https://myaccount.google.com) → **Security** → **2-Step Verification** (enable if not yet)
+        2. Go to **App passwords** → Select app: *Mail* → Select device: *Other* → name it *SEPI*
+        3. Copy the 16-character app password
+        4. On Streamlit Cloud → your app → **Settings** → **Secrets** → add:
+        ```toml
+        GMAIL_APP_PASSWORD = "your-16-char-app-password"
+        ADMIN_PASSWORD = "your-current-admin-password"
+        ```
+        """)
+
+    st.markdown("---")
+
+    # ── Get email config ──────────────────────────────────────────────────────
+    school_email = "sepiregistrar@gmail.com"
+    try:
+        gmail_app_pw = st.secrets["GMAIL_APP_PASSWORD"]
+        email_configured = True
+    except Exception:
+        gmail_app_pw = None
+        email_configured = False
+
+    if not email_configured:
+        st.warning("⚠️ Gmail App Password not configured yet. Follow the setup steps above, then come back.")
+        st.markdown("**In the meantime, you can change the password directly below (no OTP):**")
+        with st.form("direct_pw_form"):
+            cur_pw  = st.text_input("Current Password", type="password", key="dir_cur")
+            new_pw  = st.text_input("New Password",     type="password", key="dir_new")
+            new_pw2 = st.text_input("Confirm New Password", type="password", key="dir_new2")
+            submitted = st.form_submit_button("🔒 Change Password", use_container_width=True)
+            if submitted:
+                if cur_pw != st.session_state.admin_password:
+                    st.error("Current password is incorrect.")
+                elif len(new_pw) < 6:
+                    st.error("New password must be at least 6 characters.")
+                elif new_pw != new_pw2:
+                    st.error("Passwords do not match.")
+                else:
+                    st.session_state.admin_password = new_pw
+                    st.success("✅ Password changed successfully! Remember to add it to Streamlit Secrets so it persists after redeployment.")
+        return
+
+    # ── STEP 1: Request OTP ───────────────────────────────────────────────────
+    st.markdown("### Step 1 — Request OTP")
+    st.markdown(f"An OTP will be sent to **{school_email}**")
+
+    col1, col2 = st.columns([2,1])
+    otp_sent   = st.session_state.get("otp_code") is not None
+    otp_expiry = st.session_state.get("otp_expiry")
+    otp_valid  = otp_expiry and datetime.datetime.now() < otp_expiry
+
+    if otp_sent and otp_valid:
+        remaining = int((otp_expiry - datetime.datetime.now()).total_seconds())
+        st.info(f"📨 OTP sent to {school_email}. Valid for {remaining // 60}m {remaining % 60}s. Check your inbox.")
+    
+    if col1.button("📨 Send OTP to School Email",
+                   key="send_otp_btn",
+                   disabled=(otp_sent and otp_valid),
+                   use_container_width=True):
+        otp = str(random.randint(100000, 999999))
+        st.session_state.otp_code     = hashlib.sha256(otp.encode()).hexdigest()
+        st.session_state.otp_expiry   = datetime.datetime.now() + datetime.timedelta(minutes=5)
+        st.session_state.otp_verified = False
+        with st.spinner("Sending OTP email…"):
+            success = _send_otp_email(otp, school_email, gmail_app_pw)
+        if success:
+            st.success(f"✅ OTP sent to {school_email}! Check your inbox.")
+            st.rerun()
+        else:
+            err = st.session_state.pop("_email_error","Unknown error")
+            st.error(f"❌ Failed to send email: {err}")
+            st.session_state.otp_code   = None
+            st.session_state.otp_expiry = None
+
+    if col2.button("🔄 Resend OTP", key="resend_otp_btn", use_container_width=True):
+        st.session_state.otp_code   = None
+        st.session_state.otp_expiry = None
+        st.rerun()
+
+    st.markdown("---")
+
+    # ── STEP 2: Verify OTP ────────────────────────────────────────────────────
+    st.markdown("### Step 2 — Enter OTP")
+
+    with st.form("otp_verify_form"):
+        otp_input  = st.text_input("Enter the 6-digit OTP from your email",
+                                    max_chars=6, placeholder="e.g. 483920",
+                                    key="otp_input_field")
+        verify_btn = st.form_submit_button("✔️ Verify OTP", use_container_width=True)
+
+        if verify_btn:
+            if not st.session_state.get("otp_code"):
+                st.error("Please request an OTP first.")
+            elif not otp_valid:
+                st.error("OTP has expired. Please request a new one.")
+                st.session_state.otp_code = None
+            elif hashlib.sha256(otp_input.encode()).hexdigest() != st.session_state.otp_code:
+                st.error("❌ Incorrect OTP. Please try again.")
+            else:
+                st.session_state.otp_verified = True
+                st.success("✅ OTP verified! Proceed to set your new password below.")
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── STEP 3: Set New Password (only after OTP verified) ────────────────────
+    st.markdown("### Step 3 — Set New Password")
+
+    if not st.session_state.get("otp_verified"):
+        st.info("🔒 Complete OTP verification above to unlock this section.")
+        return
+
+    st.success("🔓 Identity verified — enter your new password below.")
+    with st.form("new_pw_form"):
+        new_pw  = st.text_input("New Password", type="password",
+                                 placeholder="Minimum 8 characters", key="new_pw_1")
+        new_pw2 = st.text_input("Confirm New Password", type="password",
+                                 key="new_pw_2")
+        save_btn = st.form_submit_button("💾 Save New Password", use_container_width=True)
+
+        if save_btn:
+            if len(new_pw) < 8:
+                st.error("Password must be at least 8 characters.")
+            elif new_pw != new_pw2:
+                st.error("Passwords do not match.")
+            else:
+                st.session_state.admin_password = new_pw
+                # Clear OTP state
+                st.session_state.otp_code     = None
+                st.session_state.otp_expiry   = None
+                st.session_state.otp_verified = False
+                st.success("✅ Password changed successfully!")
+                st.info(
+                    "**Important:** To make this permanent across redeployments, "
+                    "go to Streamlit Cloud → your app → Settings → Secrets and update:\n"
+                    "`ADMIN_PASSWORD = \"your-new-password\"`"
+                )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
