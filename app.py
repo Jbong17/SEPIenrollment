@@ -8,6 +8,7 @@ import json, uuid, datetime, io, os, base64
 from fees import (SCHOOL_NAME, SCHOOL_ADDRESS, SCHOOL_YEAR, SCHOOL_EMAIL,
                   SCHOOL_PHONE, LEVEL_LABEL, GRADES, compute_fees,
                   DISCOUNT_TYPES, DISCOUNT_BY_KEY)
+import db as _db
 from pdf_gen import build_enrollment_form, build_contract, build_soa
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -145,6 +146,9 @@ if "pdf_contract"not in st.session_state: st.session_state.pdf_contract= None
 if "pdf_soa"     not in st.session_state: st.session_state.pdf_soa     = None
 if "pdf_tid"     not in st.session_state: st.session_state.pdf_tid     = None
 if "soa_update_id" not in st.session_state: st.session_state.soa_update_id = None
+
+# Load student records from Cloudflare KV on first run
+_db.db_load_students_into_state()
 if "page"       not in st.session_state: st.session_state.page       = "login"
 if "user"       not in st.session_state: st.session_state.user       = None
 if "user_type"  not in st.session_state: st.session_state.user_type  = None
@@ -546,7 +550,7 @@ def page_enroll():
                 "paidAmount":    f.get("paidAmount", 0),
                 "schoolYear":    f.get("schoolYear", SCHOOL_YEAR),
             }
-            st.session_state.students[tid] = student
+            _db.db_save(student)
             st.session_state.user          = student
             st.session_state.user_type     = "student"
             st.session_state.page          = "student"
@@ -781,6 +785,12 @@ def page_admin():
 def _admin_dashboard():
     ss = st.session_state.students
     st.title("📊 Dashboard")
+    # Database connection status
+    if _db.is_configured():
+        st.success("☁️ **Cloudflare KV connected** — all records are persisted. Data survives hibernation.")
+    else:
+        st.warning("⚠️ **Cloudflare KV not configured** — records are in-memory only and will be lost on hibernation. "
+                   "Add `CF_API_TOKEN` and `CF_ACCOUNT_ID` to Streamlit Secrets to enable persistence.")
     c1,c2,c3,c4 = st.columns(4)
     c1.metric("Total Enrolled",     len(ss))
     c2.metric("Pending",            sum(1 for s in ss.values() if s.get("status")=="pending"))
@@ -930,10 +940,12 @@ def _admin_students():
                             new_rec = {"Date": str(qp_date), "Amount": f"PHP {qp_amt:,.2f}",
                                        "Mode": qp_mode, "OR No.": qp_or or "—",
                                        "Remarks": qp_note or "—"}
-                            if "paymentHistory" not in st.session_state.students[tid]:
-                                st.session_state.students[tid]["paymentHistory"] = []
-                            st.session_state.students[tid]["paymentHistory"].append(new_rec)
-                            st.session_state.students[tid]["paidAmount"] = paid + qp_amt
+                            s_pay = st.session_state.students[tid]
+                            if "paymentHistory" not in s_pay:
+                                s_pay["paymentHistory"] = []
+                            s_pay["paymentHistory"].append(new_rec)
+                            s_pay["paidAmount"] = paid + qp_amt
+                            _db.db_save(s_pay)
                             if (st.session_state.get("user") and
                                     st.session_state.user.get("trackingId") == tid):
                                 st.session_state.user["paidAmount"] = paid + qp_amt
@@ -973,7 +985,8 @@ def _admin_students():
                     index=["pending","under_review","approved","rejected"].index(s.get("status","pending")),
                     key=f"status_{tid}")
                 if st.button("✅ Update Status", key=f"upd_{tid}"):
-                    st.session_state.students[tid]["status"] = new_status
+                    s_updated = {**st.session_state.students[tid], "status": new_status}
+                    _db.db_save(s_updated)
                     st.success("Status updated."); st.rerun()
 
                 st.markdown("---")
@@ -1661,14 +1674,15 @@ def page_soa_update():
                 }
                 if "paymentHistory" not in st.session_state.students[sid]:
                     st.session_state.students[sid]["paymentHistory"] = []
-                st.session_state.students[sid]["paymentHistory"].append(new_record)
                 new_paid = paid + pay_amount
-                st.session_state.students[sid]["paidAmount"] = new_paid
-                # Update current student session if logged in
+                s_soa = st.session_state.students[sid]
+                s_soa["paymentHistory"].append(new_record)
+                s_soa["paidAmount"] = new_paid
+                _db.db_save(s_soa)
                 if (st.session_state.get("user") and
                         st.session_state.user.get("trackingId") == sid):
                     st.session_state.user["paidAmount"] = new_paid
-                    st.session_state.user["paymentHistory"] = st.session_state.students[sid]["paymentHistory"]
+                    st.session_state.user["paymentHistory"] = s_soa["paymentHistory"]
                 st.success(f"✅ Payment of {peso(pay_amount)} recorded successfully!")
                 st.rerun()
 
