@@ -171,7 +171,7 @@ def page_login():
         <p style='color:#94a3b8;font-size:12px;margin-bottom:24px'>Enrollment System · SY {SCHOOL_YEAR}</p>
         """, unsafe_allow_html=True)
         for ic, title, sub in [
-            ("📋", "Multi-level Enrollment", "Kinder to Senior High"),
+            ("📋", "Multi-level Enrollment", "Kinder to Junior High"),
             ("📄", "Document Generation",    "PDF Forms, Contract & SOA"),
             ("☁️", "Cloudflare KV Database", "JSON pushed to cloud"),
             ("📊", "Admin Dashboard",        "Analytics & management"),
