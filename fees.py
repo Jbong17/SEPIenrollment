@@ -148,6 +148,9 @@ DISCOUNT_TYPES = [
 
 DISCOUNT_BY_KEY = {d["key"]: d for d in DISCOUNT_TYPES}
 
+# ESC (Education Service Contracting) — fixed government subsidy
+ESC_SUBSIDY_AMOUNT = 9_000.00  # PHP 9,000 deducted from tuition fee
+
 
 def get_fee_group(level, grade):
     if level == "preschool":
@@ -160,23 +163,42 @@ def get_fee_group(level, grade):
     return "elem_lower"
 
 
-def compute_fees(level, grade, discount_key=None, discount_rate=None):
+def compute_fees(level, grade, discount_key=None, discount_rate=None,
+                 esc_grantee=False):
     """
-    Returns fee breakdown including discount if applicable.
-    discount_key : key from DISCOUNT_TYPES (or None)
-    discount_rate: integer percentage (e.g. 10). If None, uses rate_min.
+    Returns fee breakdown including ESC subsidy and/or school discount.
+
+    ESC grantees receive a fixed PHP 9,000 deduction from tuition (government subsidy).
+    ESC grantees may NOT combine this with school discounts (policy rule).
+
+    discount_key : key from DISCOUNT_TYPES (or None)  — ignored for ESC grantees
+    discount_rate: integer percentage                  — ignored for ESC grantees
+    esc_grantee  : bool — if True, applies PHP 9,000 ESC subsidy only
     """
-    group = get_fee_group(level, grade)
-    lines = FEE_LINES[group].copy()
+    group        = get_fee_group(level, grade)
+    lines        = FEE_LINES[group].copy()
     tuition_base = lines["Tuition Fee"]
 
-    discount_info = None
+    discount_info   = None
     discount_amount = 0.0
+    esc_info        = None
 
-    if discount_key and discount_key != "none":
+    if esc_grantee:
+        # ESC overrides all school discounts
+        esc_deduction = min(ESC_SUBSIDY_AMOUNT, tuition_base)
+        lines["Tuition Fee"] = round(tuition_base - esc_deduction, 2)
+        esc_info = {
+            "type":         "ESC",
+            "label":        "ESC Government Subsidy",
+            "amount":       esc_deduction,
+            "base_tuition": tuition_base,
+        }
+        discount_amount = esc_deduction
+        discount_info   = esc_info
+
+    elif discount_key and discount_key != "none":
         d = DISCOUNT_BY_KEY.get(discount_key)
         if d:
-            # Determine effective rate
             if discount_rate and d["requires_input"]:
                 rate = max(d["rate_min"], min(d["rate_max"], int(discount_rate)))
             else:
@@ -184,20 +206,22 @@ def compute_fees(level, grade, discount_key=None, discount_rate=None):
             discount_amount = round(tuition_base * rate / 100, 2)
             lines["Tuition Fee"] = round(tuition_base - discount_amount, 2)
             discount_info = {
-                "key":    discount_key,
-                "label":  d["label"],
-                "rate":   rate,
-                "amount": discount_amount,
+                "key":          discount_key,
+                "label":        d["label"],
+                "rate":         rate,
+                "amount":       discount_amount,
                 "base_tuition": tuition_base,
             }
 
     total = round(sum(lines.values()), 2)
     return {
-        "lines":    lines,
-        "total":    total,
-        "group":    group,
-        "discount": discount_info,
+        "lines":           lines,
+        "total":           total,
+        "group":           group,
+        "discount":        discount_info,
         "discount_amount": discount_amount,
+        "esc_grantee":     esc_grantee,
+        "esc_info":        esc_info,
     }
 
 
