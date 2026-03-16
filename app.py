@@ -12,12 +12,20 @@ from pdf_gen import build_enrollment_form, build_contract, build_soa
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="SEPI Enrollment System",
-    page_icon="🌸",
+    page_icon="sepi_logo.jpg",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-LOGO_PATH = os.path.join(os.path.dirname(__file__), "sepi_logo.jpg")
+def _find_logo():
+    base = os.path.dirname(__file__)
+    for name in ["sepi_logo.jpg", "sepi_logo.png", "sepi_logo", "SEPI_Logo_HighResol"]:
+        p = os.path.join(base, name)
+        if os.path.exists(p):
+            return p
+    return None
+
+LOGO_PATH = _find_logo()
 
 # ── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -155,7 +163,7 @@ def page_login():
 
     with col_l:
         st.markdown("---")
-        if os.path.exists(LOGO_PATH):
+        if LOGO_PATH and os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, width=100)
         st.markdown(f"""
         <h1 style='font-family:Playfair Display,serif;color:#c2185b;margin:8px 0 4px'>SEPI</h1>
@@ -221,7 +229,7 @@ def page_login():
 def page_enroll():
     # Sidebar
     with st.sidebar:
-        if os.path.exists(LOGO_PATH):
+        if LOGO_PATH and os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, width=70)
         st.markdown(f"<h3 style='color:#f48fb1;margin:0'>SEPI</h3>", unsafe_allow_html=True)
         st.markdown(f"<p style='color:rgba(255,255,255,.5);font-size:11px'>New Enrollment</p>",
@@ -238,7 +246,7 @@ def page_enroll():
         if st.button("← Back to Login"):
             st.session_state.page = "login"; st.rerun()
 
-    st.title("🌸 New Student Enrollment")
+    st.title("New Student Enrollment")
     st.caption(f"School Year {SCHOOL_YEAR}  ·  All fields marked * are required")
     f = st.session_state.form_data
 
@@ -444,7 +452,7 @@ def page_student():
     s = st.session_state.user
 
     with st.sidebar:
-        if os.path.exists(LOGO_PATH):
+        if LOGO_PATH and os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, width=70)
         st.markdown(f"<h3 style='color:#f48fb1;margin:0'>SEPI</h3>", unsafe_allow_html=True)
         st.markdown(f"<p style='color:rgba(255,255,255,.6);font-size:12px'>{s.get('firstName','')} {s.get('lastName','')}</p>", unsafe_allow_html=True)
@@ -605,7 +613,7 @@ def _student_generate(s):
 # ══════════════════════════════════════════════════════════════════════════════
 def page_admin():
     with st.sidebar:
-        if os.path.exists(LOGO_PATH):
+        if LOGO_PATH and os.path.exists(LOGO_PATH):
             st.image(LOGO_PATH, width=70)
         st.markdown("<h3 style='color:#f48fb1;margin:0'>SEPI Admin</h3>", unsafe_allow_html=True)
         st.markdown("<p style='color:rgba(255,255,255,.4);font-size:11px'>Administration Panel</p>", unsafe_allow_html=True)
