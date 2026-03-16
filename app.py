@@ -825,6 +825,38 @@ def _admin_students():
         st.info("No students found.")
         return
 
+    # ── Bulk Delete (filtered records only) ───────────────────────────────────
+    if len(filtered) > 0:
+        with st.expander(f"🗑️ Bulk Delete ({len(filtered)} filtered records)", expanded=False):
+            st.markdown(
+                f'<div style="background:#fee2e2;border:1px solid #f87171;border-radius:8px;'
+                f'padding:10px 14px;font-size:12px;color:#7f1d1d">'
+                f'⚠️ This will permanently delete all <b>{len(filtered)}</b> currently filtered student records '
+                f'from both the app and Cloudflare KV. Use the filters above to target specific records '
+                f'(e.g. search "SEPI-SAMPLE" to delete only test entries).</div>',
+                unsafe_allow_html=True
+            )
+            bulk_confirm = st.checkbox(
+                f"I confirm I want to delete {len(filtered)} records permanently",
+                key="bulk_del_confirm"
+            )
+            if st.button("🗑️ Delete All Filtered Records",
+                         key="bulk_del_btn",
+                         disabled=not bulk_confirm,
+                         use_container_width=True):
+                deleted = 0
+                for s in filtered:
+                    tid = s["trackingId"]
+                    if _db.is_configured():
+                        _db.delete_student(tid)
+                    if tid in st.session_state.students:
+                        del st.session_state.students[tid]
+                    deleted += 1
+                st.session_state.pop("bulk_del_confirm", None)
+                st.success(f"✅ {deleted} records deleted successfully.")
+                st.rerun()
+    st.markdown("---")
+
     for s in filtered:
         tid    = s["trackingId"]
         total  = float(s.get("totalFees",0) or 0)
@@ -1015,6 +1047,47 @@ def _admin_students():
                     c3d.download_button("⬇ SOA", pdfs["soa"],
                         f"{tid}_soa.pdf", "application/pdf",
                         use_container_width=True, key=f"adl_soa_{tid}")
+
+                # ── Danger Zone ───────────────────────────────────────────────
+                st.markdown("---")
+                st.markdown("**🗑️ Delete Student Record**")
+                st.markdown(
+                    f'<div style="background:#fee2e2;border:1px solid #f87171;border-radius:8px;'
+                    f'padding:10px 14px;font-size:12px;color:#7f1d1d;margin-bottom:10px">'
+                    f'⚠️ This will permanently delete <b>{s.get("firstName","")} {s.get("lastName","")}</b> '
+                    f'({tid}) from both the app and Cloudflare KV. This action cannot be undone.</div>',
+                    unsafe_allow_html=True
+                )
+                # Two-step confirmation to prevent accidental deletion
+                confirm_key = f"confirm_del_{tid}"
+                if not st.session_state.get(confirm_key):
+                    if st.button("🗑️ Delete This Record",
+                                 key=f"del_btn_{tid}",
+                                 use_container_width=True):
+                        st.session_state[confirm_key] = True
+                        st.rerun()
+                else:
+                    st.error(f"Are you sure you want to delete **{tid}** — {s.get('firstName','')} {s.get('lastName','')}? This cannot be undone.")
+                    cc1, cc2 = st.columns(2)
+                    if cc1.button("✅ Yes, Delete Permanently",
+                                  key=f"del_confirm_{tid}",
+                                  use_container_width=True):
+                        # Remove from KV
+                        if _db.is_configured():
+                            _db.delete_student(tid)
+                        # Remove from session state
+                        if tid in st.session_state.students:
+                            del st.session_state.students[tid]
+                        # Clear any cached PDFs for this student
+                        for k in [f"admin_pdf_{tid}", f"updated_soa_{tid}", confirm_key]:
+                            st.session_state.pop(k, None)
+                        st.success(f"✅ Record {tid} deleted successfully.")
+                        st.rerun()
+                    if cc2.button("❌ Cancel",
+                                  key=f"del_cancel_{tid}",
+                                  use_container_width=True):
+                        st.session_state.pop(confirm_key, None)
+                        st.rerun()
 
 def _admin_reports():
     ss = st.session_state.students
