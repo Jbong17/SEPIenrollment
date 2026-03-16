@@ -337,21 +337,21 @@ def page_enroll():
     elif st.session_state.enroll_step == 3:
         st.markdown('<div class="section-hdr">3. FATHER\'S INFORMATION</div>', unsafe_allow_html=True)
         c1,c2,c3 = st.columns(3)
-        f["fatherName"]       = c1.text_input("Full Name",       value=f.get("fatherName",""))
-        f["fatherOccupation"] = c2.text_input("Occupation",      value=f.get("fatherOccupation",""))
-        f["fatherPhone"]      = c3.text_input("Contact Number",  value=f.get("fatherPhone",""))
+        f["fatherName"]       = c1.text_input("Father Full Name",      value=f.get("fatherName",""),      key="fatherName")
+        f["fatherOccupation"] = c2.text_input("Father Occupation",     value=f.get("fatherOccupation",""), key="fatherOccupation")
+        f["fatherPhone"]      = c3.text_input("Father Contact Number", value=f.get("fatherPhone",""),      key="fatherPhone")
 
         st.markdown('<div class="section-hdr">MOTHER\'S INFORMATION</div>', unsafe_allow_html=True)
         c1b,c2b,c3b = st.columns(3)
-        f["motherName"]       = c1b.text_input("Full Name",      value=f.get("motherName",""))
-        f["motherOccupation"] = c2b.text_input("Occupation",     value=f.get("motherOccupation",""))
-        f["motherPhone"]      = c3b.text_input("Contact Number", value=f.get("motherPhone",""))
+        f["motherName"]       = c1b.text_input("Mother Full Name",      value=f.get("motherName",""),       key="motherName")
+        f["motherOccupation"] = c2b.text_input("Mother Occupation",     value=f.get("motherOccupation",""), key="motherOccupation")
+        f["motherPhone"]      = c3b.text_input("Mother Contact Number", value=f.get("motherPhone",""),       key="motherPhone")
 
         st.markdown('<div class="section-hdr">GUARDIAN (if different from parents)</div>', unsafe_allow_html=True)
         c1c,c2c,c3c = st.columns(3)
-        f["guardianName"]     = c1c.text_input("Full Name",      value=f.get("guardianName",""))
-        f["guardianRelation"] = c2c.text_input("Relationship",   value=f.get("guardianRelation",""))
-        f["guardianPhone"]    = c3c.text_input("Contact Number", value=f.get("guardianPhone",""))
+        f["guardianName"]     = c1c.text_input("Guardian Full Name",    value=f.get("guardianName",""),     key="guardianName")
+        f["guardianRelation"] = c2c.text_input("Relationship",          value=f.get("guardianRelation",""), key="guardianRelation")
+        f["guardianPhone"]    = c3c.text_input("Guardian Contact",      value=f.get("guardianPhone",""),    key="guardianPhone")
 
         col_b, col_n = st.columns(2)
         if col_b.button("← Back"):
