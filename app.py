@@ -129,6 +129,10 @@ div[data-testid="stExpander"] { border: 1px solid #fce4ec !important; border-rad
 
 # ── Session state ──────────────────────────────────────────────────────────────
 if "students"   not in st.session_state: st.session_state.students   = {}
+if "pdf_form"    not in st.session_state: st.session_state.pdf_form    = None
+if "pdf_contract"not in st.session_state: st.session_state.pdf_contract= None
+if "pdf_soa"     not in st.session_state: st.session_state.pdf_soa     = None
+if "pdf_tid"     not in st.session_state: st.session_state.pdf_tid     = None
 if "page"       not in st.session_state: st.session_state.page       = "login"
 if "user"       not in st.session_state: st.session_state.user       = None
 if "user_type"  not in st.session_state: st.session_state.user_type  = None
@@ -554,8 +558,8 @@ def _student_generate(s):
     st.title("📄 Generate Official Documents")
     st.markdown(f"""
     <div class='doc-card' style='border-color:#c2185b;background:#fce4ec;margin-bottom:16px'>
-      📋 Documents generated in <b>Long Bond Paper (8.5″ × 13″)</b> with <b>pink accent</b> 
-      and <b>SEPI logo watermark</b>. Student record is also pushed to <b>Cloudflare KV</b>.
+      📋 Documents generated in <b>Long Bond Paper (8.5″ × 13″)</b> with <b>pink accent</b>
+      and <b>SEPI logo watermark</b>. Student record also saved as JSON for Cloudflare KV.
     </div>""", unsafe_allow_html=True)
 
     col_cf = st.columns(3)
@@ -568,36 +572,60 @@ def _student_generate(s):
 
     st.markdown("---")
 
-    if st.button("🚀 Generate All 3 Documents + Push to Cloudflare KV", use_container_width=True):
-        with st.spinner("Generating PDFs and pushing record to Cloudflare KV…"):
+    # Generate button — stores PDFs in session state so download buttons persist
+    if st.button("🚀 Generate All 3 Documents", use_container_width=True,
+                 key="btn_generate_docs"):
+        with st.spinner("Generating PDFs…"):
             try:
-                pdf_form     = build_enrollment_form(s)
-                pdf_contract = build_contract(s)
-                pdf_soa      = build_soa(s)
-                tid          = s.get("trackingId","SEPI")
-                st.success("✅ All 3 documents generated! Record queued for Cloudflare KV.")
-
-                c1,c2,c3 = st.columns(3)
-                c1.download_button("⬇ Enrollment Form",   pdf_form,
-                    file_name=f"{tid}_enrollment_form.pdf", mime="application/pdf",
-                    use_container_width=True)
-                c2.download_button("⬇ Enrollment Contract", pdf_contract,
-                    file_name=f"{tid}_contract.pdf", mime="application/pdf",
-                    use_container_width=True)
-                c3.download_button("⬇ Statement of Account", pdf_soa,
-                    file_name=f"{tid}_soa.pdf", mime="application/pdf",
-                    use_container_width=True)
-
-                # JSON export
-                json_str = json.dumps(s, indent=2, default=str)
-                st.markdown("---")
-                st.markdown("**☁️ Cloudflare KV Record**")
-                st.code(json_str[:600]+"…" if len(json_str)>600 else json_str, language="json")
-                st.download_button("⬇ Download JSON Record", json_str,
-                    file_name=f"{tid}.json", mime="application/json")
-
+                st.session_state.pdf_form     = build_enrollment_form(s)
+                st.session_state.pdf_contract = build_contract(s)
+                st.session_state.pdf_soa      = build_soa(s)
+                st.session_state.pdf_tid      = s.get("trackingId", "SEPI")
+                st.rerun()
             except Exception as e:
                 st.error(f"Error generating documents: {e}")
+
+    # Download buttons shown from session state — persist across reruns
+    tid = st.session_state.get("pdf_tid")
+    if tid and tid == s.get("trackingId") and st.session_state.get("pdf_form"):
+        st.success("✅ All 3 documents ready — click below to download each one.")
+        c1, c2, c3 = st.columns(3)
+        c1.download_button(
+            label="⬇ Enrollment Form",
+            data=st.session_state.pdf_form,
+            file_name=f"{tid}_enrollment_form.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="dl_form"
+        )
+        c2.download_button(
+            label="⬇ Enrollment Contract",
+            data=st.session_state.pdf_contract,
+            file_name=f"{tid}_contract.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="dl_contract"
+        )
+        c3.download_button(
+            label="⬇ Statement of Account",
+            data=st.session_state.pdf_soa,
+            file_name=f"{tid}_soa.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key="dl_soa"
+        )
+        # JSON record
+        st.markdown("---")
+        st.markdown("**☁️ JSON Record (for Cloudflare KV)**")
+        json_str = json.dumps(s, indent=2, default=str)
+        st.code(json_str[:600] + ("…" if len(json_str) > 600 else ""), language="json")
+        st.download_button(
+            label="⬇ Download JSON Record",
+            data=json_str,
+            file_name=f"{tid}.json",
+            mime="application/json",
+            key="dl_json"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -672,15 +700,33 @@ def _admin_students():
                 st.session_state.students[s["trackingId"]]["status"] = new_status
                 st.success("Status updated."); st.rerun()
 
+            # Store per-student PDFs in session state so download buttons persist
+            gen_key = f"admin_pdf_{s['trackingId']}"
             if st.button("📄 Generate Docs", key=f"gen_{s['trackingId']}"):
                 with st.spinner("Generating…"):
-                    c1d,c2d,c3d = st.columns(3)
-                    c1d.download_button("Enrollment Form", build_enrollment_form(s),
-                        f"{s['trackingId']}_form.pdf","application/pdf",use_container_width=True)
-                    c2d.download_button("Contract", build_contract(s),
-                        f"{s['trackingId']}_contract.pdf","application/pdf",use_container_width=True)
-                    c3d.download_button("SOA", build_soa(s),
-                        f"{s['trackingId']}_soa.pdf","application/pdf",use_container_width=True)
+                    try:
+                        st.session_state[gen_key] = {
+                            "form":     build_enrollment_form(s),
+                            "contract": build_contract(s),
+                            "soa":      build_soa(s),
+                        }
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+            if st.session_state.get(gen_key):
+                pdfs = st.session_state[gen_key]
+                tid  = s["trackingId"]
+                c1d, c2d, c3d = st.columns(3)
+                c1d.download_button("⬇ Enrollment Form", pdfs["form"],
+                    f"{tid}_form.pdf", "application/pdf",
+                    use_container_width=True, key=f"dl_form_{tid}")
+                c2d.download_button("⬇ Contract", pdfs["contract"],
+                    f"{tid}_contract.pdf", "application/pdf",
+                    use_container_width=True, key=f"dl_contract_{tid}")
+                c3d.download_button("⬇ SOA", pdfs["soa"],
+                    f"{tid}_soa.pdf", "application/pdf",
+                    use_container_width=True, key=f"dl_soa_{tid}")
 
 def _admin_reports():
     ss = st.session_state.students
