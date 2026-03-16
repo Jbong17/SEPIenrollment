@@ -289,7 +289,8 @@ def build_enrollment_form(s: dict) -> bytes:
     story = []
     sy    = s.get("schoolYear", SCHOOL_YEAR)
     fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
-                         s.get("discountKey"), s.get("discountRate"))
+                         s.get("discountKey"), s.get("discountRate"),
+                         esc_grantee=s.get("escGrantee", False))
 
     story.append(_logo_header(sy))
     story.append(Spacer(1, 5))
@@ -390,16 +391,20 @@ def build_enrollment_form(s: dict) -> bytes:
     story.append(Spacer(1, 3))
     disc_info_ef = s.get("discountInfo") or fdata.get("discount")
     if disc_info_ef:
-        d_key  = disc_info_ef.get("key","")
         d_lbl  = disc_info_ef.get("label","")
-        d_rate = disc_info_ef.get("rate", 0)
         d_amt  = disc_info_ef.get("amount", 0)
         d_base = disc_info_ef.get("base_tuition", 0)
-        story.append(_row1("Discount Type Availed", d_lbl))
-        story.append(_row2("Discount Rate", f"{d_rate}% on Tuition Fee",
-                           "Discount Amount", f"PHP {_peso(d_amt)}"))
+        is_esc = disc_info_ef.get("type") == "ESC"
+        story.append(_row1("Subsidy / Discount Availed", d_lbl))
+        if is_esc:
+            story.append(_row2("ESC Subsidy (Fixed)", f"PHP {_peso(d_amt)}",
+                               "Source", "DepEd Government Subsidy"))
+        else:
+            d_rate = disc_info_ef.get("rate", 0)
+            story.append(_row2("Discount Rate", f"{d_rate}% on Tuition Fee",
+                               "Discount Amount", f"PHP {_peso(d_amt)}"))
         story.append(_row2("Tuition (Original)", f"PHP {_peso(d_base)}",
-                           "Tuition (After Discount)", f"PHP {_peso(d_base - d_amt)}"))
+                           "Tuition (After Deduction)", f"PHP {_peso(d_base - d_amt)}"))
         if s.get("discountRemarks"):
             story.append(_row1("Supporting Documents / Remarks", s.get("discountRemarks","")))
         story.append(Paragraph(
@@ -500,7 +505,8 @@ def build_contract(s: dict) -> bytes:
     learner   = f"{s.get('firstName','')} {s.get('lastName','')}".strip() or "[Student Name]"
     grade     = s.get("grade", "___")
     lrn       = s.get("lrn", "____________")
-    fdata     = compute_fees(s.get("level","jhs"), grade)
+    fdata     = compute_fees(s.get("level","jhs"), grade,
+                             esc_grantee=s.get("escGrantee", False))
     reg_fee   = fdata["lines"].get("Registration Fee", 6000)
 
     story.append(_logo_header(sy))
@@ -626,7 +632,8 @@ def build_soa(s: dict) -> bytes:
     story = []
     sy    = s.get("schoolYear", SCHOOL_YEAR)
     fdata = compute_fees(s.get("level","jhs"), s.get("grade","Grade 7"),
-                         s.get("discountKey"), s.get("discountRate"))
+                         s.get("discountKey"), s.get("discountRate"),
+                         esc_grantee=s.get("escGrantee", False))
     lines = fdata["lines"]
     total = fdata["total"]
     paid  = float(s.get("paidAmount", 0) or 0)
@@ -694,10 +701,15 @@ def build_soa(s: dict) -> bytes:
         if k == "Tuition Fee" and disc_info_soa:
             d_base = disc_info_soa.get("base_tuition", v)
             d_amt  = disc_info_soa.get("amount", 0)
-            d_rate = disc_info_soa.get("rate", 0)
-            curr.append([f"Tuition Fee (Gross)", _peso(d_base)])
-            curr.append([f"  Less: {disc_info_soa.get('label','')} ({d_rate}%)",
-                         f"({_peso(d_amt)})"])
+            is_esc = disc_info_soa.get("type") == "ESC"
+            curr.append(["Tuition Fee (Gross)", _peso(d_base)])
+            if is_esc:
+                curr.append(["  Less: ESC Government Subsidy (DepEd)",
+                              f"({_peso(d_amt)})"])
+            else:
+                d_rate = disc_info_soa.get("rate", 0)
+                curr.append([f"  Less: {disc_info_soa.get('label','')} ({d_rate}%)",
+                             f"({_peso(d_amt)})"])
             curr.append(["Tuition Fee (Net)", _peso(v)])
         else:
             curr.append([k, _peso(v)])
