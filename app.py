@@ -6,7 +6,8 @@ SY 2026–2027
 import streamlit as st
 import json, uuid, datetime, io, os, base64
 from fees import (SCHOOL_NAME, SCHOOL_ADDRESS, SCHOOL_YEAR, SCHOOL_EMAIL,
-                  SCHOOL_PHONE, LEVEL_LABEL, GRADES, compute_fees)
+                  SCHOOL_PHONE, LEVEL_LABEL, GRADES, compute_fees,
+                  DISCOUNT_TYPES, DISCOUNT_BY_KEY)
 from pdf_gen import build_enrollment_form, build_contract, build_soa
 
 # ── Page config ────────────────────────────────────────────────────────────────
@@ -222,6 +223,7 @@ def page_login():
                 st.session_state.page      = "enroll"
                 st.session_state.form_data = {}
                 st.session_state.enroll_step = 1
+                st.session_state.pop('discount_preview',None)
                 st.rerun()
             if st.button("💳 Update SOA / Payment", key="go_soa_update", use_container_width=True):
                 st.session_state.page = "soa_update"
@@ -253,7 +255,7 @@ def page_enroll():
         st.markdown(f"<p style='color:rgba(255,255,255,.5);font-size:11px'>New Enrollment</p>",
                     unsafe_allow_html=True)
         st.markdown("---")
-        steps = ["Personal Info","Academic","Parent/Guardian","Documents","Review & Submit"]
+        steps = ["Personal Info","Academic","Parent/Guardian","Documents","Scholarship/Discount","Review & Submit"]
         cur   = st.session_state.enroll_step
         for i, s in enumerate(steps, 1):
             icon = "✅" if i < cur else ("🔵" if i == cur else "⚪")
@@ -395,12 +397,111 @@ def page_enroll():
         col_b, col_n = st.columns(2)
         if col_b.button("← Back"):
             st.session_state.enroll_step = 3; st.rerun()
-        if col_n.button("Next: Review & Submit →", use_container_width=True):
+        if col_n.button("Next: Scholarship/Discount →", use_container_width=True):
             st.session_state.enroll_step = 5; st.rerun()
 
     # ── Step 5: Review & Submit ───────────────────────────────────────────────
     elif st.session_state.enroll_step == 5:
-        st.markdown('<div class="section-hdr">5. REVIEW & SUBMIT</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-hdr">5. SCHOLARSHIP / DISCOUNT</div>', unsafe_allow_html=True)
+        st.caption("Only ONE discount may be availed per student. The highest applicable discount will be granted. Discounts apply to Tuition Fee only.")
+
+        # ESC grantee check
+        esc_grantee = st.radio(
+            "Is the student an ESC (Education Service Contracting) Grantee?",
+            ["No", "Yes"],
+            index=0 if not f.get("escGrantee") else (1 if f.get("escGrantee") else 0),
+            horizontal=True, key="esc_radio"
+        )
+        f["escGrantee"] = (esc_grantee == "Yes")
+
+        st.markdown("---")
+        st.markdown("**Select applicable discount (select None if no discount):**")
+
+        # Build option list — filter ESC-restricted for ESC grantees
+        discount_opts = [{"key": "none", "label": "No Discount / Not Applicable", "rate_label": "0%", "description": ""}]
+        for d in DISCOUNT_TYPES:
+            if f.get("escGrantee") and d["not_for_esc"]:
+                continue
+            discount_opts.append(d)
+
+        opt_labels = [f"{d['label']}  ({d['rate_label']})" for d in discount_opts]
+        cur_key = f.get("discountKey","none")
+        cur_idx = next((i for i,d in enumerate(discount_opts) if d["key"]==cur_key), 0)
+
+        sel_idx = st.radio(
+            "Discount Type",
+            range(len(opt_labels)),
+            format_func=lambda i: opt_labels[i],
+            index=cur_idx,
+            key="discount_radio",
+            label_visibility="collapsed"
+        )
+        sel_disc = discount_opts[sel_idx]
+        f["discountKey"] = sel_disc["key"]
+
+        # Show description
+        if sel_disc.get("description"):
+            st.markdown(f'<div style="background:#fce4ec;border-left:3px solid #c2185b;padding:8px 14px;border-radius:0 8px 8px 0;font-size:12px;color:#333;margin:6px 0"><b>Eligibility:</b> {sel_disc["description"]}</div>', unsafe_allow_html=True)
+
+        # Rate input for variable-rate discounts
+        f["discountRate"] = f.get("discountRate", None)
+        if sel_disc.get("requires_input") and sel_disc["key"] != "none":
+            rate_val = st.slider(
+                f"Select discount rate ({sel_disc['rate_min']}% – {sel_disc['rate_max']}%)",
+                min_value=sel_disc["rate_min"],
+                max_value=sel_disc["rate_max"],
+                value=int(f.get("discountRate") or sel_disc["rate_min"]),
+                step=5 if sel_disc["rate_max"] - sel_disc["rate_min"] >= 10 else 1,
+                key="disc_rate_slider"
+            )
+            f["discountRate"] = rate_val
+        else:
+            if sel_disc["key"] != "none":
+                f["discountRate"] = sel_disc["rate_min"]
+            else:
+                f["discountRate"] = 0
+
+        # Document requirement notice
+        if sel_disc["key"] != "none":
+            st.markdown("---")
+            st.info("📎 Supporting documents must be submitted to the Registrar's Office for discount validation. Discount is provisional until documents are verified.")
+            st.text_area(
+                "Document submitted / Remarks (optional)",
+                value=f.get("discountRemarks",""),
+                placeholder="e.g. Solo Parent ID No. XXXXXXX submitted on MM/DD/YYYY",
+                key="disc_remarks_input",
+                height=80
+            )
+            f["discountRemarks"] = st.session_state.get("disc_remarks_input","")
+
+        # Live fee preview
+        if f.get("level") and f.get("grade"):
+            fdata_preview = compute_fees(
+                f["level"], f["grade"],
+                f.get("discountKey"), f.get("discountRate")
+            )
+            st.markdown("---")
+            st.markdown("**💰 Updated Fee Preview**")
+            pc1,pc2,pc3 = st.columns(3)
+            tuition_base = fdata_preview["lines"].get("Tuition Fee",0)
+            if fdata_preview.get("discount"):
+                disc_info = fdata_preview["discount"]
+                pc1.metric("Tuition Fee (Original)", f"₱{disc_info['base_tuition']:,.2f}")
+                pc2.metric(f"Discount ({disc_info['rate']}%)", f"-₱{disc_info['amount']:,.2f}", delta=f"-{disc_info['rate']}%")
+                pc3.metric("Total After Discount", f"₱{fdata_preview['total']:,.2f}")
+            else:
+                pc1.metric("Tuition Fee", f"₱{tuition_base:,.2f}")
+                pc2.metric("Discount", "None")
+                pc3.metric("Total", f"₱{fdata_preview['total']:,.2f}")
+
+        col_b5, col_n5 = st.columns(2)
+        if col_b5.button("← Back", key="disc_back"):
+            st.session_state.enroll_step = 4; st.rerun()
+        if col_n5.button("Next: Review & Submit →", key="disc_next", use_container_width=True):
+            st.session_state.enroll_step = 6; st.rerun()
+
+    elif st.session_state.enroll_step == 6:
+        st.markdown('<div class="section-hdr">6. REVIEW & SUBMIT</div>', unsafe_allow_html=True)
         fdata = compute_fees(f.get("level","jhs"), f.get("grade","Grade 7"))
 
         col_l, col_r = st.columns(2)
@@ -434,18 +535,24 @@ def page_enroll():
 
         col_b, col_s = st.columns(2)
         if col_b.button("← Back"):
-            st.session_state.enroll_step = 4; st.rerun()
+            st.session_state.enroll_step = 5; st.rerun()
         if col_s.button("✅ Submit Enrollment", use_container_width=True):
             tid = gen_id()
+            fdata_final = compute_fees(
+                f.get("level","jhs"), f.get("grade","Grade 7"),
+                f.get("discountKey"), f.get("discountRate")
+            )
             student = {
                 **f,
-                "trackingId":  tid,
-                "status":      "pending",
-                "enrolledAt":  datetime.datetime.now().isoformat(),
-                "fees":        fdata["lines"],
-                "totalFees":   fdata["total"],
-                "paidAmount":  f.get("paidAmount", 0),
-                "schoolYear":  f.get("schoolYear", SCHOOL_YEAR),
+                "trackingId":    tid,
+                "status":        "pending",
+                "enrolledAt":    datetime.datetime.now().isoformat(),
+                "fees":          fdata_final["lines"],
+                "totalFees":     fdata_final["total"],
+                "discountInfo":  fdata_final.get("discount"),
+                "discountAmount":fdata_final.get("discount_amount",0),
+                "paidAmount":    f.get("paidAmount", 0),
+                "schoolYear":    f.get("schoolYear", SCHOOL_YEAR),
             }
             st.session_state.students[tid] = student
             st.session_state.user          = student
