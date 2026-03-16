@@ -3,7 +3,7 @@ SEPI Official Fee Schedule SY 2026-2027
 Levels offered: Kinder / Preschool, Elementary, Junior High School (JHS)
 """
 
-SCHOOL_ADDRESS = "Zone 10, Brgy. Dela Paz, Antipolo City, Rizal 1870"
+SCHOOL_ADDRESS = "#66 Siruna Village Phase III, Mambugan, Antipolo City"
 SCHOOL_YEAR    = "2026-2027"
 SCHOOL_NAME    = "SCHOOL OF EVERLASTING PEARL, INC. (SEPI)"
 SCHOOL_EMAIL   = "sepiregistrar@gmail.com"
