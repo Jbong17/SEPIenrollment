@@ -1016,7 +1016,7 @@ def _admin_students():
             sc3.metric("Balance",      peso(bal))
             sc4.metric("Status",       status.replace("_"," ").title())
 
-            inner_tabs = st.tabs(["📊 SOA & Payments", "📋 Student Info", "⚙️ Actions"])
+            inner_tabs = st.tabs(["📊 SOA & Payments", "📋 Student Info", "⚙️ Actions", "✏️ Edit Info"])
 
             # ── TAB 1: Inline SOA Viewer ──────────────────────────────────────
             with inner_tabs[0]:
@@ -1228,6 +1228,90 @@ def _admin_students():
                                   key=f"del_cancel_{tid}",
                                   use_container_width=True):
                         st.session_state.pop(confirm_key, None)
+                        st.rerun()
+
+            # ── TAB 4: Edit Student Info ──────────────────────────────────────
+            with inner_tabs[3]:
+                st.markdown("#### ✏️ Edit Student Information")
+                st.caption("Changes save immediately to Cloudflare KV and sync across all devices.")
+
+                with st.form(f"edit_student_{tid}", clear_on_submit=False):
+                    st.markdown("**📌 ESC & Discount**")
+                    ec1, ec2 = st.columns(2)
+                    edit_esc = ec1.radio(
+                        "ESC Grantee",
+                        ["No","Yes"],
+                        index=1 if s.get("escGrantee") else 0,
+                        horizontal=True, key=f"edit_esc_{tid}",
+                        help="Update when ESC approval is confirmed in 2nd quarter"
+                    )
+                    disc_opts   = [{"key":"none","label":"No Discount","rate_label":"0%",
+                                    "requires_input":False,"rate_min":0,"rate_max":0}] + DISCOUNT_TYPES
+                    disc_labels = [f"{d['label']} ({d['rate_label']})" for d in disc_opts]
+                    cur_dk      = s.get("discountKey","none")
+                    cur_didx    = next((i for i,d in enumerate(disc_opts) if d["key"]==cur_dk), 0)
+                    edit_didx   = ec2.selectbox("Discount Type",
+                                                options=range(len(disc_labels)),
+                                                format_func=lambda i: disc_labels[i],
+                                                index=cur_didx, key=f"edit_disc_{tid}")
+                    edit_disc   = disc_opts[edit_didx]
+                    edit_rate   = int(s.get("discountRate") or 0)
+                    if edit_disc.get("requires_input") and edit_disc["key"] != "none":
+                        edit_rate = st.slider(
+                            f"Discount Rate ({edit_disc['rate_min']}%–{edit_disc['rate_max']}%)",
+                            min_value=edit_disc["rate_min"], max_value=edit_disc["rate_max"],
+                            value=max(edit_disc["rate_min"], min(edit_rate, edit_disc["rate_max"])),
+                            key=f"edit_rate_{tid}")
+                    st.markdown("---")
+                    st.markdown("**👤 Personal Details**")
+                    ep1,ep2,ep3 = st.columns(3)
+                    edit_fname = ep1.text_input("First Name",   value=s.get("firstName",""),  key=f"ef_fn_{tid}")
+                    edit_lname = ep2.text_input("Last Name",    value=s.get("lastName",""),   key=f"ef_ln_{tid}")
+                    edit_mname = ep3.text_input("Middle Name",  value=s.get("middleName",""), key=f"ef_mn_{tid}")
+                    ep4,ep5    = st.columns(2)
+                    edit_phone = ep4.text_input("Mobile",       value=s.get("phone",""),      key=f"ef_ph_{tid}")
+                    edit_email = ep5.text_input("Email",        value=s.get("email",""),      key=f"ef_em_{tid}")
+                    edit_addr  = st.text_input("Address",       value=s.get("address",""),    key=f"ef_ad_{tid}")
+                    st.markdown("---")
+                    st.markdown("**🎓 Academic**")
+                    ea1,ea2,ea3 = st.columns(3)
+                    level_opts2 = list(LEVEL_LABEL.keys())
+                    level_disp2 = [LEVEL_LABEL[k] for k in level_opts2]
+                    cur_lv2     = level_opts2.index(s.get("level","jhs")) if s.get("level") in level_opts2 else 2
+                    edit_lv_sel = ea1.selectbox("Level", level_disp2, index=cur_lv2, key=f"ef_lv_{tid}")
+                    edit_level2 = level_opts2[level_disp2.index(edit_lv_sel)]
+                    gr_opts2    = GRADES.get(edit_level2, [])
+                    cur_gr2     = s.get("grade","") if s.get("grade","") in gr_opts2 else (gr_opts2[0] if gr_opts2 else "")
+                    edit_grade2 = ea2.selectbox("Grade", gr_opts2,
+                                                index=gr_opts2.index(cur_gr2) if cur_gr2 in gr_opts2 else 0,
+                                                key=f"ef_gr_{tid}")
+                    edit_lrn2   = ea3.text_input("LRN", value=s.get("lrn",""), key=f"ef_lrn_{tid}")
+                    st.markdown("---")
+                    save_edit   = st.form_submit_button("💾 Save All Changes", use_container_width=True)
+                    if save_edit:
+                        new_esc2   = (edit_esc == "Yes")
+                        new_dk2    = edit_disc["key"]
+                        new_dr2    = edit_rate if edit_disc.get("requires_input") else (
+                                      edit_disc.get("rate_min",0) if new_dk2 != "none" else 0)
+                        new_fd2    = compute_fees(edit_level2, edit_grade2, new_dk2,
+                                                  new_dr2, esc_grantee=new_esc2)
+                        updated2   = {
+                            **st.session_state.students[tid],
+                            "firstName":   edit_fname,  "lastName":  edit_lname,
+                            "middleName":  edit_mname,  "phone":     edit_phone,
+                            "email":       edit_email,  "address":   edit_addr,
+                            "level":       edit_level2, "grade":     edit_grade2,
+                            "lrn":         edit_lrn2,
+                            "escGrantee":  new_esc2,
+                            "discountKey": new_dk2,    "discountRate": new_dr2,
+                            "discountInfo":new_fd2.get("discount"),
+                            "fees":        new_fd2["lines"],
+                            "totalFees":   new_fd2["total"],
+                        }
+                        st.session_state.students[tid] = updated2
+                        _db.db_save(updated2)
+                        st.session_state.pop(f"admin_pdf_{tid}", None)
+                        st.success(f"✅ Updated and saved to Cloudflare KV!")
                         st.rerun()
 
 def _admin_reports():
