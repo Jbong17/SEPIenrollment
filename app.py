@@ -14,7 +14,7 @@ from payroll import (compute_payroll, compute_monthly_payroll, sss_employee,
                       EMPLOYEE_TYPES, OTHER_DEDUCTION_TYPES,
                       SEPI_INITIAL_STAFF)
 from hr_pdf import build_payslip, build_payroll_summary, build_coe, build_leave_form
-from pdf_gen import build_enrollment_form, build_contract, build_soa
+from pdf_gen import build_enrollment_form, build_contract, build_soa, build_promissory_note, NOTARIZED_THRESHOLD
 
 # HR module functions — loaded from hr.py with safe fallback
 try:
@@ -635,6 +635,41 @@ def page_enroll():
             f["paidAmount"]  = st.number_input("Initial Payment (PHP)", min_value=0.0,
                                                value=float(f.get("paidAmount",0) or 0), step=100.0)
 
+            # ── Conditional Admission / Promissory Note ───────────────────────
+            balance_preview = round(fdata["total"] - float(f.get("paidAmount",0) or 0), 2)
+            if balance_preview > 0:
+                st.markdown("---")
+                st.markdown("**📋 Conditional Admission**")
+                f["conditionallyAdmitted"] = st.checkbox(
+                    "Student is conditionally admitted (has unpaid balance)",
+                    value=f.get("conditionallyAdmitted", False),
+                    help="Check this if the student is admitted with an outstanding balance subject to a promissory note."
+                )
+                if f.get("conditionallyAdmitted"):
+                    pn_type_label = ("NOTARIZED Promissory Note"
+                                     if balance_preview > NOTARIZED_THRESHOLD
+                                     else "Regular Promissory Note")
+                    st.info(
+                        f"📝 Balance of **PHP {balance_preview:,.2f}** requires a "
+                        f"**{pn_type_label}** (threshold: PHP {NOTARIZED_THRESHOLD:,.0f})."
+                    )
+                    st.markdown("**Payment Schedule** (edit due dates as needed):")
+                    inst = round(balance_preview / 3, 2)
+                    default_sched = [
+                        {"due":"October 31, 2026",  "amount":inst,                              "remarks":"1st Installment"},
+                        {"due":"January 31, 2027",  "amount":inst,                              "remarks":"2nd Installment"},
+                        {"due":"March 31, 2027",    "amount":round(balance_preview-inst*2,2),   "remarks":"Final Installment"},
+                    ]
+                    cur_sched = f.get("pnSchedule", default_sched)
+                    new_sched = []
+                    for i, item in enumerate(cur_sched, 1):
+                        sc1, sc2, sc3 = st.columns([2,1,2])
+                        due    = sc1.text_input(f"Due Date {i}",   value=item.get("due",""),     key=f"pn_due_{i}")
+                        amt    = sc2.number_input(f"Amount {i}",   value=float(item.get("amount",0)), step=100.0, key=f"pn_amt_{i}")
+                        remark = sc3.text_input(f"Remarks {i}",    value=item.get("remarks",""), key=f"pn_rem_{i}")
+                        new_sched.append({"due":due, "amount":amt, "remarks":remark})
+                    f["pnSchedule"] = new_sched
+
         st.info("📄 After enrollment, the system will take you directly to document generation. Your record will also be pushed to Cloudflare KV.")
 
         col_b, col_s = st.columns(2)
@@ -658,6 +693,8 @@ def page_enroll():
                 "discountAmount":fdata_final.get("discount_amount",0),
                 "paidAmount":    f.get("paidAmount", 0),
                 "schoolYear":    f.get("schoolYear", SCHOOL_YEAR),
+                "conditionallyAdmitted": f.get("conditionallyAdmitted", False),
+                "pnSchedule":    f.get("pnSchedule", []),
             }
             _db.db_save(student)
             st.session_state.user          = student
@@ -805,13 +842,19 @@ def _student_generate(s):
     st.markdown("---")
 
     # Generate button — stores PDFs in session state so download buttons persist
-    if st.button("🚀 Generate All 3 Documents", use_container_width=True,
-                 key="btn_generate_docs"):
+    balance_check = float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0)
+    needs_pn      = s.get("conditionallyAdmitted") and balance_check > 0
+    btn_label     = "🚀 Generate All 4 Documents" if needs_pn else "🚀 Generate All 3 Documents"
+    if st.button(btn_label, use_container_width=True, key="btn_generate_docs"):
         with st.spinner("Generating PDFs…"):
             try:
                 st.session_state.pdf_form     = build_enrollment_form(s)
                 st.session_state.pdf_contract = build_contract(s)
                 st.session_state.pdf_soa      = build_soa(s)
+                if needs_pn:
+                    st.session_state.pdf_pn   = build_promissory_note(s)
+                else:
+                    st.session_state.pdf_pn   = None
                 st.session_state.pdf_tid      = s.get("trackingId", "SEPI")
                 st.rerun()
             except Exception as e:
@@ -846,7 +889,18 @@ def _student_generate(s):
             use_container_width=True,
             key=f"dl_soa_{tid}"
         )
-        # JSON record
+        # Promissory note download
+        if st.session_state.get("pdf_pn"):
+            pn_bal   = float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0)
+            pn_label = "Notarized" if pn_bal > NOTARIZED_THRESHOLD else "Regular"
+            st.download_button(
+                label=f"⬇ {pn_label} Promissory Note",
+                data=st.session_state["pdf_pn"],
+                file_name=f"{tid}_promissory_note.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key=f"dl_pn_{tid}"
+            )
         st.markdown("---")
         st.markdown("**☁️ JSON Record (for Cloudflare KV)**")
         json_str = json.dumps(s, indent=2, default=str)
@@ -1165,13 +1219,17 @@ def _admin_students():
                 st.markdown("---")
                 st.markdown("**Generate PDF Documents**")
                 gen_key = f"admin_pdf_{tid}"
-                if st.button("📄 Generate All Docs", key=f"gen_{tid}", use_container_width=True):
+                _bal_s   = float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0)
+                _needs_pn = s.get("conditionallyAdmitted") and _bal_s > 0
+                _btn_lbl  = "📄 Generate All Docs + Promissory Note" if _needs_pn else "📄 Generate All Docs"
+                if st.button(_btn_lbl, key=f"gen_{tid}", use_container_width=True):
                     with st.spinner("Generating…"):
                         try:
                             st.session_state[gen_key] = {
                                 "form":     build_enrollment_form(s),
                                 "contract": build_contract(s),
                                 "soa":      build_soa(s),
+                                "pn":       build_promissory_note(s) if _needs_pn else None,
                             }
                             st.rerun()
                         except Exception as e:
@@ -1188,6 +1246,12 @@ def _admin_students():
                     c3d.download_button("⬇ SOA", pdfs["soa"],
                         f"{tid}_soa.pdf", "application/pdf",
                         use_container_width=True, key=f"adl_soa_{tid}")
+                    if pdfs.get("pn"):
+                        pn_bal2  = float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0)
+                        pn_lbl2  = "Notarized" if pn_bal2 > NOTARIZED_THRESHOLD else "Regular"
+                        st.download_button(f"⬇ {pn_lbl2} Promissory Note", pdfs["pn"],
+                            f"{tid}_promissory_note.pdf", "application/pdf",
+                            use_container_width=True, key=f"adl_pn_{tid}")
 
                 # ── Danger Zone ───────────────────────────────────────────────
                 st.markdown("---")
