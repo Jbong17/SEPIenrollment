@@ -64,7 +64,7 @@ def _hr_kv_verify() -> tuple:
             return False, "CF_ACCOUNT_ID not set"
         r = _req.get(
             f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}/keys",
-            headers=hdrs, params={"limit":1}, timeout=8
+            headers=hdrs, params={"limit": 10}, timeout=8
         )
         if r.status_code == 200:
             return True, f"HR KV connected ({r.json().get('result_info',{}).get('count','?')} records)"
@@ -132,7 +132,7 @@ def _hr_load_all():
     base = f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}"
     try:
         r = requests.get(f"{base}/keys", headers=hdrs,
-                         params={"limit": 1000}, timeout=12)
+                         params={"limit": 10000}, timeout=12)
         if r.status_code != 200:
             st.session_state.hr_loaded = True
             return
@@ -1051,7 +1051,7 @@ def _admin_leave_module():
             base = f"https://api.cloudflare.com/client/v4/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}"
             try:
                 r = requests.get(f"{base}/keys", headers=hdrs,
-                                 params={"prefix":"leave:","limit":1000}, timeout=10)
+                                 params={"prefix":"leave:","limit": 10000}, timeout=10)
                 if r.status_code == 200:
                     for item in r.json().get("result",[]):
                         rv = requests.get(f"{base}/values/{item['name']}", headers=hdrs, timeout=8)
