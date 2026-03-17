@@ -1136,34 +1136,257 @@ def _admin_students():
                         st.rerun()
 
 def _admin_reports():
+    import pandas as pd
+    from collections import defaultdict
+
     ss = st.session_state.students
     st.title("📈 Reports & Analytics")
-    total_expected = sum(float(s.get("totalFees",0) or 0) for s in ss.values())
-    total_paid     = sum(float(s.get("paidAmount",0) or 0) for s in ss.values())
-    c1,c2,c3 = st.columns(3)
-    c1.metric("Total Expected",   peso(total_expected))
-    c2.metric("Total Collected",  peso(total_paid))
-    c3.metric("Outstanding",      peso(total_expected-total_paid))
+
+    if not ss:
+        st.info("No enrolled students yet.")
+        return
+
+    all_students   = list(ss.values())
+    total_expected = sum(float(s.get("totalFees",0) or 0) for s in all_students)
+    total_paid     = sum(float(s.get("paidAmount",0) or 0) for s in all_students)
+    total_balance  = total_expected - total_paid
+    collection_rate = round((total_paid / total_expected * 100), 1) if total_expected > 0 else 0
+
+    # ── Top KPI row ───────────────────────────────────────────────────────────
+    k1,k2,k3,k4,k5 = st.columns(5)
+    k1.metric("Total Students",    len(all_students))
+    k2.metric("Total Assessed",    peso(total_expected))
+    k3.metric("Total Collected",   peso(total_paid))
+    k4.metric("Outstanding",       peso(total_balance))
+    k5.metric("Collection Rate",   f"{collection_rate}%",
+              delta=f"{collection_rate}% collected",
+              delta_color="normal" if collection_rate >= 50 else "inverse")
+
     st.markdown("---")
-    st.markdown("**By Level Summary**")
-    rows = []
-    for k,lbl in LEVEL_LABEL.items():
-        lvl = [s for s in ss.values() if s.get("level")==k]
-        rows.append({"Level":lbl,"Enrolled":len(lvl),
-                     "Approved":sum(1 for s in lvl if s.get("status")=="approved"),
-                     "Collected":sum(float(s.get("paidAmount",0) or 0) for s in lvl),
-                     "Expected": sum(float(s.get("totalFees",0) or 0) for s in lvl)})
-    if rows:
-        import pandas as pd
-        df = pd.DataFrame(rows)
-        df["Collected"] = df["Collected"].apply(lambda x: f"₱{x:,.2f}")
-        df["Expected"]  = df["Expected"].apply(lambda x: f"₱{x:,.2f}")
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    st.markdown("---")
-    st.markdown("**Export All Records**")
-    all_json = json.dumps(list(ss.values()), indent=2, default=str)
-    st.download_button("⬇ Export JSON (All Students)", all_json,
-                       "sepi_all_students.json", "application/json", key="exp_reports")
+
+    # ── Report tabs ───────────────────────────────────────────────────────────
+    r_tabs = st.tabs(["📅 Monthly Collection", "🏫 By Level", "📊 Collection Rate", "📤 Export"])
+
+    # ── TAB 1: Monthly Collection ─────────────────────────────────────────────
+    with r_tabs[0]:
+        st.markdown("#### Monthly Collection Report")
+        st.caption("Based on payment history recorded per student.")
+
+        # Aggregate payments by month from paymentHistory
+        monthly = defaultdict(lambda: {"collected": 0.0, "transactions": 0})
+        for s in all_students:
+            for ph in s.get("paymentHistory", []):
+                try:
+                    date_str = ph.get("Date","")
+                    if not date_str: continue
+                    ym = date_str[:7]  # "YYYY-MM"
+                    amt_str = str(ph.get("Amount","0")).replace("PHP","").replace("₱","").replace(",","").strip()
+                    amt = float(amt_str)
+                    monthly[ym]["collected"] += amt
+                    monthly[ym]["transactions"] += 1
+                except Exception:
+                    pass
+
+        # Also count initial payments from paidAmount on enrollment date
+        enrollment_by_month = defaultdict(float)
+        for s in all_students:
+            enrolled_at = s.get("enrolledAt","")
+            if enrolled_at and len(enrolled_at) >= 7:
+                ym = enrolled_at[:7]
+                init_paid = float(s.get("paidAmount",0) or 0)
+                # Only add if no payment history (avoid double counting)
+                if not s.get("paymentHistory") and init_paid > 0:
+                    monthly[ym]["collected"] += init_paid
+                    monthly[ym]["transactions"] += 1
+
+        if monthly:
+            months_sorted = sorted(monthly.keys())
+            running_total = 0
+            month_rows = []
+            for ym in months_sorted:
+                data = monthly[ym]
+                collected = round(data["collected"], 2)
+                running_total += collected
+                try:
+                    yr, mo = ym.split("-")
+                    import calendar
+                    mo_label = f"{calendar.month_name[int(mo)]} {yr}"
+                except Exception:
+                    mo_label = ym
+                rate_of_total = round(collected / total_expected * 100, 1) if total_expected > 0 else 0
+                month_rows.append({
+                    "Month":          mo_label,
+                    "Collected":      f"PHP {collected:,.2f}",
+                    "Transactions":   data["transactions"],
+                    "Running Total":  f"PHP {running_total:,.2f}",
+                    "% of Total Due": f"{rate_of_total}%",
+                })
+
+            df_monthly = pd.DataFrame(month_rows)
+            st.dataframe(df_monthly, use_container_width=True, hide_index=True,
+                column_config={
+                    "Month":          st.column_config.TextColumn(width="medium"),
+                    "Collected":      st.column_config.TextColumn(width="medium"),
+                    "Transactions":   st.column_config.NumberColumn(width="small"),
+                    "Running Total":  st.column_config.TextColumn(width="medium"),
+                    "% of Total Due": st.column_config.TextColumn(width="small"),
+                })
+
+            # Bar chart — monthly collection
+            try:
+                chart_data = pd.DataFrame({
+                    "Month":     [r["Month"] for r in month_rows],
+                    "Collected": [monthly[m]["collected"] for m in months_sorted],
+                })
+                st.bar_chart(chart_data.set_index("Month"), color="#C2185B")
+            except Exception:
+                pass
+
+            # Download monthly report
+            csv_m = df_monthly.to_csv(index=False)
+            st.download_button("⬇ Download Monthly Collection (CSV)", csv_m,
+                               "SEPI_Monthly_Collection.csv", "text/csv",
+                               key="dl_monthly_csv")
+        else:
+            st.info("No payment history recorded yet. Payments logged through the SOA Update or Admin → Students → Record Payment will appear here.")
+
+    # ── TAB 2: By Level & Grade ───────────────────────────────────────────────
+    with r_tabs[1]:
+        st.markdown("#### Collection by Level")
+        level_rows = []
+        for k, lbl in LEVEL_LABEL.items():
+            lvl = [s for s in all_students if s.get("level") == k]
+            exp  = sum(float(s.get("totalFees",0) or 0) for s in lvl)
+            paid = sum(float(s.get("paidAmount",0) or 0) for s in lvl)
+            rate = round(paid / exp * 100, 1) if exp > 0 else 0
+            level_rows.append({
+                "Level":           lbl,
+                "Students":        len(lvl),
+                "Approved":        sum(1 for s in lvl if s.get("status")=="approved"),
+                "Total Assessed":  f"PHP {exp:,.2f}",
+                "Total Collected": f"PHP {paid:,.2f}",
+                "Outstanding":     f"PHP {exp-paid:,.2f}",
+                "Collection Rate": f"{rate}%",
+            })
+        st.dataframe(pd.DataFrame(level_rows), use_container_width=True, hide_index=True)
+
+        st.markdown("#### Collection by Grade")
+        GRADE_ORDER = {
+            "Nursery":0,"Kinder 1":1,"Kinder 2":2,
+            "Grade 1":3,"Grade 2":4,"Grade 3":5,"Grade 4":6,"Grade 5":7,"Grade 6":8,
+            "Grade 7":9,"Grade 8":10,"Grade 9":11,"Grade 10":12,
+        }
+        grade_data = defaultdict(lambda:{"students":0,"expected":0,"paid":0})
+        for s in all_students:
+            g = s.get("grade","—")
+            grade_data[g]["students"] += 1
+            grade_data[g]["expected"] += float(s.get("totalFees",0) or 0)
+            grade_data[g]["paid"]     += float(s.get("paidAmount",0) or 0)
+
+        grade_rows = []
+        for g in sorted(grade_data.keys(), key=lambda x: GRADE_ORDER.get(x, 99)):
+            d = grade_data[g]
+            rate = round(d["paid"] / d["expected"] * 100, 1) if d["expected"] > 0 else 0
+            grade_rows.append({
+                "Grade":           g,
+                "Students":        d["students"],
+                "Total Assessed":  f"PHP {d['expected']:,.2f}",
+                "Total Collected": f"PHP {d['paid']:,.2f}",
+                "Outstanding":     f"PHP {d['expected']-d['paid']:,.2f}",
+                "Collection Rate": f"{rate}%",
+            })
+        st.dataframe(pd.DataFrame(grade_rows), use_container_width=True, hide_index=True)
+
+    # ── TAB 3: Collection Rate Analysis ───────────────────────────────────────
+    with r_tabs[2]:
+        st.markdown("#### Collection Rate Analysis")
+
+        # Overall rate gauge
+        col_gauge, col_stats = st.columns([1,1])
+        with col_gauge:
+            st.markdown(f"""
+            <div style="background:{'#dcfce7' if collection_rate>=75 else ('#fef3c7' if collection_rate>=50 else '#fee2e2')};
+                        border:2px solid {'#16a34a' if collection_rate>=75 else ('#d97706' if collection_rate>=50 else '#dc2626')};
+                        border-radius:16px;padding:24px;text-align:center">
+              <div style="font-size:13px;color:#374151;font-weight:600;margin-bottom:8px">
+                OVERALL COLLECTION RATE
+              </div>
+              <div style="font-size:52px;font-weight:800;color:{'#16a34a' if collection_rate>=75 else ('#d97706' if collection_rate>=50 else '#dc2626')}">
+                {collection_rate}%
+              </div>
+              <div style="font-size:11px;color:#6b7280;margin-top:8px">
+                PHP {total_paid:,.2f} collected out of PHP {total_expected:,.2f}
+              </div>
+              <div style="font-size:11px;color:#6b7280;margin-top:4px">
+                {'✅ On track' if collection_rate >= 75 else ('⚠️ Needs attention' if collection_rate >= 50 else '🔴 Critical — below 50%')}
+              </div>
+            </div>""", unsafe_allow_html=True)
+
+        with col_stats:
+            st.markdown("**Per-Student Collection Status**")
+            fully_paid  = sum(1 for s in all_students
+                              if float(s.get("paidAmount",0) or 0) >= float(s.get("totalFees",0) or 0) - 0.01)
+            partial     = sum(1 for s in all_students
+                              if 0 < float(s.get("paidAmount",0) or 0) < float(s.get("totalFees",0) or 0))
+            unpaid      = sum(1 for s in all_students
+                              if float(s.get("paidAmount",0) or 0) == 0)
+            rs1,rs2,rs3 = st.columns(3)
+            rs1.metric("Fully Paid",   fully_paid,  delta=f"{round(fully_paid/len(all_students)*100,1)}%")
+            rs2.metric("Partial",      partial,      delta=f"{round(partial/len(all_students)*100,1)}%")
+            rs3.metric("Unpaid",       unpaid,       delta=f"{round(unpaid/len(all_students)*100,1)}%",
+                       delta_color="inverse" if unpaid > 0 else "normal")
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("**Students with Outstanding Balance**")
+            with_balance = [(s.get("lastName",""),
+                             s.get("firstName",""),
+                             s.get("grade",""),
+                             s.get("trackingId",""),
+                             float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0))
+                            for s in all_students
+                            if float(s.get("totalFees",0) or 0) - float(s.get("paidAmount",0) or 0) > 0.01]
+            with_balance.sort(key=lambda x: -x[4])
+            if with_balance:
+                bal_df = pd.DataFrame(with_balance,
+                    columns=["Last Name","First Name","Grade","Tracking ID","Balance"])
+                bal_df["Balance"] = bal_df["Balance"].apply(lambda x: f"PHP {x:,.2f}")
+                st.dataframe(bal_df, use_container_width=True, hide_index=True)
+            else:
+                st.success("All students are fully paid!")
+
+    # ── TAB 4: Export ─────────────────────────────────────────────────────────
+    with r_tabs[3]:
+        st.markdown("#### Export Records")
+        ec1, ec2 = st.columns(2)
+
+        all_json = json.dumps(list(ss.values()), indent=2, default=str)
+        ec1.download_button("⬇ Export All Students (JSON)", all_json,
+                           "sepi_all_students.json", "application/json",
+                           key="exp_reports", use_container_width=True)
+
+        # Full CSV export
+        export_rows = []
+        for s in all_students:
+            exp  = float(s.get("totalFees",0) or 0)
+            paid = float(s.get("paidAmount",0) or 0)
+            export_rows.append({
+                "Tracking ID":    s.get("trackingId",""),
+                "Last Name":      s.get("lastName",""),
+                "First Name":     s.get("firstName",""),
+                "Level":          LEVEL_LABEL.get(s.get("level",""),"—"),
+                "Grade":          s.get("grade",""),
+                "Status":         s.get("status",""),
+                "Total Fees":     exp,
+                "Amount Paid":    paid,
+                "Balance":        exp - paid,
+                "Collection Rate":f"{round(paid/exp*100,1) if exp else 0}%",
+                "Enrolled On":    s.get("enrolledAt","")[:10],
+                "School Year":    s.get("schoolYear",""),
+            })
+        csv_all = pd.DataFrame(export_rows).to_csv(index=False)
+        ec2.download_button("⬇ Export All Students (CSV)", csv_all,
+                           "sepi_all_students.csv", "text/csv",
+                           key="exp_reports_csv", use_container_width=True)
 
 def _admin_cloud():
     KV_ID = "7d035b4c332449c5993651ab62478609"
