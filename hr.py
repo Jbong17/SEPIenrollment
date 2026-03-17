@@ -428,7 +428,7 @@ def _hr_process_payroll():
         st.rerun()
 
 
-def _show_payroll_run(run: dict, label: str):
+def _show_payroll_run(run: dict, label: str, caller: str = "main"):
     """Display a processed payroll run with summary and per-employee detail."""
     import pandas as pd
     results = run.get("results", {})
@@ -459,10 +459,10 @@ def _show_payroll_run(run: dict, label: str):
     cols = st.columns(min(len(results), 4))
     for i, (tid, r) in enumerate(results.items()):
         col = cols[i % 4]
-        ps_key = f"ps_{tid}_{run['periodKey']}"
+        ps_key = f"ps_{caller}_{tid}_{run['periodKey']}"
         if not st.session_state.get(ps_key):
             if col.button(f"📄 {r.get('teacherName','').split(',')[0]}",
-                          key=f"genpslip_{tid}_{run['periodKey']}", use_container_width=True):
+                          key=f"genpslip_{caller}_{tid}_{run['periodKey']}", use_container_width=True):
                 st.session_state[ps_key] = build_payslip(r)
                 st.rerun()
         else:
@@ -472,14 +472,14 @@ def _show_payroll_run(run: dict, label: str):
                 f"Payslip_{tid}_{run['periodKey']}.pdf",
                 "application/pdf",
                 use_container_width=True,
-                key=f"dlps_{tid}_{run['periodKey']}"
+                key=f"dlps_{caller}_{tid}_{run['periodKey']}"
             )
 
     # Excel export
     st.markdown("---")
     xls_key = f"xls_{run['periodKey']}"
     if not st.session_state.get(xls_key):
-        if st.button("📊 Export Payroll Register (Excel)", key=f"genxls_{run['periodKey']}",
+        if st.button("📊 Export Payroll Register (Excel)", key=f"genxls_{caller}_{run['periodKey']}",
                      use_container_width=True):
             import io as _io
             all_rows = [r for r in results.values()]
@@ -516,7 +516,7 @@ def _show_payroll_run(run: dict, label: str):
                            st.session_state[xls_key],
                            f"PayrollRegister_{run['periodKey']}.xlsx",
                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           key=f"dlxls_{run['periodKey']}")
+                           key=f"dlxls_{caller}_{run['periodKey']}")
 
 
 # ── TAB 3: PAYROLL HISTORY ─────────────────────────────────────────────────────
@@ -595,7 +595,7 @@ def _hr_documents():
                 st.session_state[ps_key],
                 f"Payslip_{sel_emp}_{sel_run_key}.pdf",
                 "application/pdf",
-                key=f"dl_doc_ps_{sel_emp}_{sel_run_key}"
+                key=f"dl_doc_ps_{caller}_{sel_emp}_{sel_run_key}"
             )
 
 
@@ -664,7 +664,7 @@ def _payroll_process_tab():
 
     if existing:
         st.success(f"✅ Payroll for **{period_label}** is already processed.")
-        _show_monthly_payroll(existing, period_label, ym_str)
+        _show_monthly_payroll(existing, period_label, ym_str, caller="process")
         if st.button("🔄 Re-process this month"):
             del st.session_state.payroll_runs[run_key]
             st.rerun()
@@ -764,7 +764,7 @@ def _payroll_process_tab():
         st.rerun()
 
 
-def _show_monthly_payroll(run: dict, period_label: str, ym_str: str):
+def _show_monthly_payroll(run: dict, period_label: str, ym_str: str, caller: str = "main"):
     """Show processed payroll summary + generate printable files."""
     import pandas as pd
     results = run.get("results", {})
@@ -795,10 +795,10 @@ def _show_monthly_payroll(run: dict, period_label: str, ym_str: str):
     gc1,gc2 = st.columns(2)
 
     # Payroll Summary Register
-    summary_key = f"pr_summary_{ym_str}"
+    summary_key = f"pr_summary_{caller}_{ym_str}"
     if not st.session_state.get(summary_key):
         if gc1.button("📊 Generate Payroll Register",
-                       key=f"gen_reg_{ym_str}", use_container_width=True):
+                       key=f"gen_reg_{caller}_{ym_str}", use_container_width=True):
             with st.spinner("Building register…"):
                 mr_list = sorted(results.values(),
                                  key=lambda x: (
@@ -814,13 +814,13 @@ def _show_monthly_payroll(run: dict, period_label: str, ym_str: str):
                              f"PayrollRegister_{ym_str}.pdf",
                              "application/pdf",
                              use_container_width=True,
-                             key=f"dl_reg_{ym_str}")
+                             key=f"dl_reg_{caller}_{ym_str}")
 
     # All Payslips
-    all_ps_key = f"pr_allps_{ym_str}"
+    all_ps_key = f"pr_allps_{caller}_{ym_str}"
     if not st.session_state.get(all_ps_key):
         if gc2.button("📋 Generate All Payslips",
-                       key=f"gen_all_ps_{ym_str}", use_container_width=True):
+                       key=f"gen_all_ps_{caller}_{ym_str}", use_container_width=True):
             with st.spinner("Generating payslips…"):
                 from reportlab.platypus import SimpleDocTemplate
                 from pypdf import PdfWriter
@@ -844,7 +844,7 @@ def _show_monthly_payroll(run: dict, period_label: str, ym_str: str):
                              f"AllPayslips_{ym_str}.pdf",
                              "application/pdf",
                              use_container_width=True,
-                             key=f"dl_all_ps_{ym_str}")
+                             key=f"dl_all_ps_{caller}_{ym_str}")
 
     # Individual payslips
     st.markdown("**Individual Payslips:**")
@@ -881,7 +881,7 @@ def _payroll_history_tab():
         with st.expander(f"**{lbl}** — {run.get('staffCount',0)} staff | "
                           f"Total Net: {peso(run.get('totalNetMonth',0))} | "
                           f"Processed: {run.get('processedOn','')[:10]}"):
-            _show_monthly_payroll(run, lbl, run.get("yearMonth",""))
+            _show_monthly_payroll(run, lbl, run.get("yearMonth",""), caller=f"hist_{key}")
 
 
 # ── Staff Directory Tab ────────────────────────────────────────────────────────
