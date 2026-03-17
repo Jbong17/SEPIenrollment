@@ -606,12 +606,52 @@ def _hr_payroll_history():
     if not runs:
         st.info("No payroll runs processed yet.")
         return
+
     st.markdown(f"**{len(runs)} payroll run{'s' if len(runs)!=1 else ''} on record**")
+
     for key in sorted(runs.keys(), reverse=True):
-        run = runs[key]
+        run  = runs[key]
         label = run.get("cutoffLabel","")
-        with st.expander(f"**{label}** — {len(run.get('results',{}))} staff | Net: {peso(run.get('totalNetPay',0))} | Processed: {run.get('processedOn','')[:10]}"):
+
+        with st.expander(f"**{label}** — {len(run.get('results',{}))} staff | "
+                         f"Net: {peso(run.get('totalNetPay',0))} | "
+                         f"Processed: {run.get('processedOn','')[:10]}"):
             _show_payroll_run(run, label, caller=f"hist_{key}")
+
+            # ── Delete this payroll run ───────────────────────────────────────
+            st.markdown("---")
+            st.markdown("**🗑️ Delete this payroll run**")
+            confirm_key = f"confirm_del_payroll_{key}"
+
+            if not st.session_state.get(confirm_key):
+                if st.button(f"🗑️ Delete {label}",
+                             key=f"del_payroll_btn_{key}",
+                             help="Permanently delete this payroll run from KV"):
+                    st.session_state[confirm_key] = True
+                    st.rerun()
+            else:
+                st.error(f"⚠️ Delete **{label}**? This cannot be undone. "
+                         f"Payslips already downloaded are unaffected.")
+                cc1, cc2 = st.columns(2)
+                if cc1.button("✅ Yes, Delete Permanently",
+                              key=f"del_payroll_confirm_{key}",
+                              use_container_width=True):
+                    # Remove from KV
+                    _hr_delete_kv(key)
+                    # Remove from session state
+                    del st.session_state.payroll_runs[key]
+                    # Clear any cached PDFs for this run
+                    for ck in list(st.session_state.keys()):
+                        if key.replace("payroll:","") in ck:
+                            del st.session_state[ck]
+                    st.session_state.pop(confirm_key, None)
+                    st.success(f"✅ Payroll run '{label}' deleted.")
+                    st.rerun()
+                if cc2.button("❌ Cancel",
+                              key=f"del_payroll_cancel_{key}",
+                              use_container_width=True):
+                    st.session_state.pop(confirm_key, None)
+                    st.rerun()
 
 
 # ── TAB 4: DOCUMENTS ──────────────────────────────────────────────────────────
