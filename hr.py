@@ -178,8 +178,7 @@ def _admin_hr():
     n_payroll  = len(st.session_state.payroll_runs)
     sync_col1.caption(f"☁️ Loaded from KV: **{n_teachers}** staff · **{n_payroll}** payroll runs")
     if sync_col2.button("🔄 Sync", key="hr_sync_btn", help="Reload all HR records from Cloudflare KV"):
-        with st.spinner("Syncing from Cloudflare KV..."):
-            _hr_sync_from_kv()
+        st.session_state.hr_loaded = False
         st.rerun()
 
     hr_tab = st.tabs(["👥 Staff Directory", "💰 Process Payroll",
@@ -716,8 +715,7 @@ def page_payroll_portal():
         st.markdown("---")
         if st.button("🔄 Sync from Cloud", key="payroll_sync", use_container_width=True,
                      help="Reload all records from Cloudflare KV"):
-            with st.spinner("Syncing from Cloudflare KV..."):
-                _hr_sync_from_kv()
+            st.session_state.hr_loaded = False
             st.rerun()
         if st.button("🚪 Logout"):
             logout(); st.rerun()
