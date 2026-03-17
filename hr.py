@@ -463,7 +463,8 @@ def _show_payroll_run(run: dict, label: str, caller: str = "main"):
         if not st.session_state.get(ps_key):
             if col.button(f"📄 {r.get('teacherName','').split(',')[0]}",
                           key=f"genpslip_{caller}_{tid}_{run['periodKey']}", use_container_width=True):
-                st.session_state[ps_key] = build_payslip(r)
+                _teacher = st.session_state.teachers.get(tid, r)
+                st.session_state[ps_key] = build_payslip(r["p1"], r["p2"], _teacher)
                 st.rerun()
         else:
             col.download_button(
@@ -587,7 +588,9 @@ def _hr_documents():
         if not st.session_state.get(ps_key):
             if st.button("📄 Generate Payslip", key="gen_ps_doc", use_container_width=True):
                 with st.spinner("Generating…"):
-                    st.session_state[ps_key] = build_payslip(run_results[sel_emp])
+                    _t = st.session_state.teachers.get(sel_emp, run_results[sel_emp])
+                    st.session_state[ps_key] = build_payslip(
+                        run_results[sel_emp]["p1"], run_results[sel_emp]["p2"], _t)
                 st.rerun()
         else:
             st.download_button(
@@ -706,22 +709,42 @@ def _payroll_process_tab():
                                        step=100.0, key=f"ln_{tid}_{ym_str}", label_visibility="collapsed")
             inputs_1[tid] = {"days": d1, "substitution": sub, "salary_loan_store": loan}
 
-    st.markdown("#### 2nd Period (Days 16–End, max 10 working days)")
+    st.markdown("#### 2nd Period (Days 16–End, max 10 working days) + Deductions")
+    st.caption("Government deductions (SSS/PhilHealth/Pag-IBIG) are auto-computed. Enter other deductions below.")
     with st.container():
-        hc2 = st.columns([0.3,2.5,1,1])
-        hc2[0].markdown("**#**"); hc2[1].markdown("**Name**")
-        hc2[2].markdown("**Days**"); hc2[3].markdown("**Additional Pay (₱)**")
+        hc2 = st.columns([0.3, 2.2, 0.8, 0.9, 0.9, 0.9, 1.0])
+        hc2[0].markdown("**#**")
+        hc2[1].markdown("**Name**")
+        hc2[2].markdown("**Days**")
+        hc2[3].markdown("**Addl Pay**")
+        hc2[4].markdown("**Salary Loan**")
+        hc2[5].markdown("**Tuition Fee**")
+        hc2[6].markdown("**Other Deduct.**")
 
         for i, t in enumerate(sorted_teachers, 1):
             tid = t["teacherId"]
-            rc2 = st.columns([0.3,2.5,1,1])
+            rc2 = st.columns([0.3, 2.2, 0.8, 0.9, 0.9, 0.9, 1.0])
             rc2[0].markdown(f"{i}")
-            rc2[1].markdown(f"**{t.get('name','')}**")
-            d2   = rc2[2].number_input("", min_value=0.0, max_value=10.0, value=10.0,
-                                        step=1.0, key=f"d2_{tid}_{ym_str}", label_visibility="collapsed")
-            addl = rc2[3].number_input("", min_value=0.0, value=0.0,
-                                        step=100.0, key=f"ap_{tid}_{ym_str}", label_visibility="collapsed")
-            inputs_2[tid] = {"days": d2, "additional_pay": addl}
+            basic_t = float(t.get("basicMonthlyPay",0) or 0)
+            ancil_t = float(t.get("ancillaryPay",0) or 0)
+            rc2[1].markdown("**" + t.get("name","") + "** — PHP " + f"{basic_t:,.0f}")
+            d2    = rc2[2].number_input("", min_value=0.0, max_value=10.0, value=10.0,
+                                         step=1.0, key=f"d2_{tid}_{ym_str}", label_visibility="collapsed")
+            addl  = rc2[3].number_input("", min_value=0.0, value=0.0,
+                                         step=100.0, key=f"ap_{tid}_{ym_str}", label_visibility="collapsed")
+            loan  = rc2[4].number_input("", min_value=0.0, value=0.0,
+                                         step=100.0, key=f"sl_{tid}_{ym_str}", label_visibility="collapsed")
+            tuit  = rc2[5].number_input("", min_value=0.0, value=0.0,
+                                         step=100.0, key=f"tf_{tid}_{ym_str}", label_visibility="collapsed")
+            othr  = rc2[6].number_input("", min_value=0.0, value=0.0,
+                                         step=100.0, key=f"od_{tid}_{ym_str}", label_visibility="collapsed")
+            inputs_2[tid] = {
+                "days":              d2,
+                "additional_pay":    addl,
+                "salary_loan":       loan,
+                "tuition_fee":       tuit,
+                "other_deductions":  {"Other": othr} if othr else {},
+            }
 
     st.markdown("---")
     if st.button("🚀 Process Payroll", use_container_width=True, key="run_pr2"):
@@ -743,8 +766,9 @@ def _payroll_process_tab():
                     "year_month": ym_str,
                     "days_reported": inputs_2[tid]["days"],
                     "additional_pay": inputs_2[tid]["additional_pay"],
-                    "salary_loan": inputs_1[tid]["salary_loan_store"],
-                    "other_deductions": {},
+                    "salary_loan": inputs_1[tid]["salary_loan_store"] + inputs_2[tid].get("salary_loan", 0),
+                    "tuition_fee": inputs_2[tid].get("tuition_fee", 0),
+                    "other_deductions": inputs_2[tid].get("other_deductions", {}),
                 }
                 results[tid] = compute_monthly_payroll(t, p1_data, p2_data)
             payroll_run = {
