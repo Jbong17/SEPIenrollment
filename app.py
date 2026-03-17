@@ -206,11 +206,14 @@ def status_badge(status):
     return f'<span class="{cls}">{label}</span>'
 
 def logout():
-    st.session_state.page     = "login"
-    st.session_state.user     = None
-    st.session_state.user_type= None
-    st.session_state.form_data= {}
+    st.session_state.page       = "login"
+    st.session_state.user       = None
+    st.session_state.user_type  = None
+    st.session_state.form_data  = {}
     st.session_state.enroll_step = 1
+    # Force KV reload on next login
+    st.session_state.hr_loaded   = False
+    st.session_state._db_loaded  = False
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  LOGIN PAGE
@@ -836,12 +839,21 @@ def page_admin():
 def _admin_dashboard():
     ss = st.session_state.students
     st.title("📊 Dashboard")
-    # Database connection status
-    if _db.is_configured():
-        st.success("☁️ **Cloudflare KV connected** — all records are persisted. Data survives hibernation.")
+    # Database connection — live test
+    kv_ok, kv_msg = _db.verify_connection()
+    if kv_ok:
+        st.success(f"☁️ **Cloudflare KV connected** — {kv_msg}. All records persist across devices.")
     else:
-        st.warning("⚠️ **Cloudflare KV not configured** — records are in-memory only and will be lost on hibernation. "
-                   "Add `CF_API_TOKEN` and `CF_ACCOUNT_ID` to Streamlit Secrets to enable persistence.")
+        st.error(
+            f"🔴 **Cloudflare KV NOT saving** — {kv_msg}\n\n"
+            f"**Records entered on this device will NOT appear on other devices until this is fixed.**\n\n"
+            f"Go to: [share.streamlit.io](https://share.streamlit.io) → your app → ⋮ → Settings → Secrets "
+            f"and verify `CF_API_TOKEN` and `CF_ACCOUNT_ID` are correct."
+        )
+    # HR KV status
+    hr_ok, hr_msg = _hr_kv_verify() if _HR_MODULE_OK else (False, "HR module not loaded")
+    if not hr_ok:
+        st.error(f"🔴 **HR Payroll KV NOT saving** — {hr_msg}")
     c1,c2,c3,c4 = st.columns(4)
     c1.metric("Total Enrolled",     len(ss))
     c2.metric("Pending",            sum(1 for s in ss.values() if s.get("status")=="pending"))
