@@ -14,6 +14,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
 
 from fees import (SCHOOL_NAME, SCHOOL_ADDRESS, SCHOOL_EMAIL,
                   SCHOOL_PHONE, SCHOOL_CITY)
+PHONE = SCHOOL_PHONE
 
 LETTER     = (8.5*inch, 11*inch)
 LEGAL      = (8.5*inch, 13*inch)
@@ -26,6 +27,7 @@ if not os.path.exists(LOGO_PATH):
         if os.path.exists(_p): LOGO_PATH = _p; break
 
 NAVY  = colors.HexColor("#0A1628")
+PINK  = colors.HexColor("#C2185B")
 DGRAY = colors.HexColor("#374151")
 LGRAY = colors.HexColor("#F3F4F6")
 MGRAY = colors.HexColor("#D1D5DB")
@@ -61,16 +63,53 @@ _BD=[("GRID",(0,0),(-1,-1),0.3,MGRAY),("LEFTPADDING",(0,0),(-1,-1),4),
      ("FONTNAME",(0,0),(-1,-1),"Helvetica"),("FONTSIZE",(0,0),(-1,-1),8)]
 
 def _logo_hdr(cw):
-    p=Paragraph(f"<b>{SCHOOL_NAME}</b><br/><font size=8 color='#6B7280'>{SCHOOL_ADDRESS}</font><br/><font size=7 color='#6B7280'>{SCHOOL_EMAIL} | {SCHOOL_PHONE}</font>",ST["sname"])
+    """
+    Official SEPI letterhead matching the school's document format:
+      [Logo] | vertical pink line | SCHOOL NAME (large bold)
+                                    Full address + DepEd IDs + emails
+    """
+    # Right-side text block — big school name + all details
+    school_txt = Paragraph(
+        f"<b><font size=14>{SCHOOL_NAME}</font></b><br/>"
+        f"<font size=8 color='#374151'>"
+        f"#066 Siruna Village – Phase III, Marcos Highway, Mambugan, Antipolo City 1870</font><br/>"
+        f"<font size=7.5 color='#374151'>"
+        f"eMail: sepi402954@gmail.com  |  sepiregistrar@gmail.com  |  {PHONE}</font><br/>"
+        f"<font size=7.5 color='#374151'>"
+        f"DepEd School ID No.: 402954  |  ESC School ID No.: 403694</font><br/>"
+        f"<font size=7.5 color='#374151'>"
+        f"Government Recognition Nos.: K-042 s.2009  |  E-041 s.2012  |  026 s.2011</font>",
+        ParagraphStyle("_lhdr", fontName="Helvetica-Bold", fontSize=14,
+                       textColor=NAVY, leading=16)
+    )
+
+    LOGO_W = 62   # logo column
+    SEP_W  = 12   # thin separator column
+    TXT_W  = cw - LOGO_W - SEP_W
+
+    # Separator cell — draws a vertical pink line via bottom border trick
+    sep_para = Paragraph("", ParagraphStyle("_sep", fontSize=1))
+
     try:
-        logo=RLImage(LOGO_PATH,width=42,height=42)
-        data,ww=[[logo,p]],[48,cw-48]
+        logo = RLImage(LOGO_PATH, width=56, height=56)
+        row  = [[logo, sep_para, school_txt]]
+        ww   = [LOGO_W, SEP_W, TXT_W]
     except Exception:
-        data,ww=[[p]],[cw]
-    t=Table(data,colWidths=ww)
-    t.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),("GRID",(0,0),(-1,-1),0,WHITE),
-                           ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
-                           ("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0)]))
+        row  = [[sep_para, school_txt]]
+        ww   = [SEP_W, cw - SEP_W]
+
+    t = Table(row, colWidths=ww)
+    t.setStyle(TableStyle([
+        ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+        ("GRID",          (0,0), (-1,-1), 0, WHITE),
+        ("LEFTPADDING",   (0,0), (-1,-1), 0),
+        ("RIGHTPADDING",  (0,0), (-1,-1), 0),
+        ("TOPPADDING",    (0,0), (-1,-1), 0),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 0),
+        # Pink right-border on separator column = vertical line
+        ("LINEAFTER",     (1,0), (1,-1),  2, PINK),
+        ("LEFTPADDING",   (2,0), (2,-1),  10),
+    ]))
     return t
 
 def _page_letter(canvas,doc):
@@ -419,11 +458,8 @@ def build_payroll_summary(monthly_results: list, year_month: str, period_label: 
 # =============================================================================
 def build_coe(teacher: dict) -> bytes:
     """
-    Generate Certificate of Employment.
-    - Signature lines are blank (no pre-filled names).
-    - Date of issuance is auto-generated at time of PDF creation.
-    - Purpose: whatever legal purpose it may serve.
-    - Photo included if teacher has 'photoB64' field.
+    Certificate of Employment — pink accent, SEPI logo, blank sig lines, auto-date.
+    Photo (if provided) appears right-aligned in a pink-bordered 2x2 box.
     """
     buf=io.BytesIO()
     pw,ph=LETTER
@@ -440,65 +476,99 @@ def build_coe(teacher: dict) -> bytes:
     basic=float(teacher.get("basicMonthlyPay",0) or 0)
     photo_b64=teacher.get("photoB64","")
 
-    # ── Header with optional photo ────────────────────────────────────────────
-    story.append(_logo_hdr(cw))
-    story.append(Spacer(1,6))
-    story.append(HRFlowable(width="100%",thickness=2,color=NAVY,spaceAfter=4))
-    story.append(Paragraph("CERTIFICATE OF EMPLOYMENT",ST["title"]))
-    story.append(HRFlowable(width="100%",thickness=1,color=MGRAY,spaceAfter=12))
+    # ── Pink page frame ───────────────────────────────────────────────────────
+    def _page_coe(canvas, doc):
+        canvas.saveState()
+        # Top pink bar (running header)
+        canvas.setFillColor(PINK)
+        canvas.rect(0, ph-0.38*inch, pw, 0.38*inch, fill=1, stroke=0)
+        canvas.setFillColor(WHITE); canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawCentredString(pw/2, ph-0.23*inch, SCHOOL_NAME)
+        # Bottom pink bar
+        canvas.setFillColor(PINK)
+        canvas.rect(0, 0, pw, 0.30*inch, fill=1, stroke=0)
+        canvas.setFillColor(WHITE); canvas.setFont("Helvetica", 7)
+        canvas.drawString(MARGIN, 0.10*inch,
+                          f"For verification: {SCHOOL_EMAIL}  |  {SCHOOL_PHONE}")
+        canvas.drawRightString(pw-MARGIN, 0.10*inch, f"Page {canvas.getPageNumber()}")
+        # Thin pink left border accent
+        canvas.setStrokeColor(PINK); canvas.setLineWidth(3)
+        canvas.line(0.25*inch, 0.35*inch, 0.25*inch, ph-0.47*inch)
+        canvas.restoreState()
 
+    # ── Logo header ───────────────────────────────────────────────────────────
+    story.append(_logo_hdr(cw))
+    story.append(Spacer(1,5))
+    story.append(HRFlowable(width="100%",thickness=2,color=PINK,spaceAfter=3))
+
+    # Pink title banner
+    title_tbl = Table([[Paragraph("CERTIFICATE OF EMPLOYMENT",
+        ParagraphStyle("_ct",fontName="Helvetica-Bold",fontSize=14,
+                       textColor=WHITE,alignment=TA_CENTER,leading=18))]],
+        colWidths=[cw])
+    title_tbl.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0),(0,0), PINK),
+        ("TOPPADDING",    (0,0),(0,0), 8),
+        ("BOTTOMPADDING", (0,0),(0,0), 8),
+        ("LEFTPADDING",   (0,0),(0,0), 0),
+    ]))
+    story.append(title_tbl)
+    story.append(HRFlowable(width="100%",thickness=1,color=PINK,spaceAfter=12))
     story.append(Paragraph("TO WHOM IT MAY CONCERN:",ST["bold"]))
     story.append(Spacer(1,10))
 
-    # ── Optional 2x2 photo — right-aligned beside the body text ──────────────
+    # ── Body text + photo side by side ────────────────────────────────────────
+    body_para = Paragraph(
+        f"This is to certify that <b>{name}</b> is a <b>{estatus} {etype}</b> employee of "
+        f"the <b>{SCHOOL_NAME}</b>, with principal office address at {SCHOOL_ADDRESS}, "
+        f"currently holding the position of <b>{pos}</b>.",
+        ST["legal"])
+
     if photo_b64:
         import base64 as _b64
         try:
-            raw=_b64.b64decode(photo_b64)
-            img_buf=io.BytesIO(raw)
-            # Standard 2x2 inch photo
-            photo_img=RLImage(img_buf, width=1.5*inch, height=1.5*inch)
-            # Place photo right-aligned, body text on the left
-            body_w = cw - 1.8*inch
-            ph_tbl = Table(
-                [[
-                    Paragraph(
-                        f"This is to certify that <b>{name}</b> is a <b>{estatus} {etype}</b> employee of "
-                        f"the <b>{SCHOOL_NAME}</b>, with principal office address at {SCHOOL_ADDRESS}, "
-                        f"currently holding the position of <b>{pos}</b>.",
-                        ST["legal"]),
-                    photo_img
-                ]],
-                colWidths=[body_w, 1.8*inch]
-            )
-            ph_tbl.setStyle(TableStyle([
-                ("VALIGN",        (0,0), (-1,-1), "TOP"),
-                ("GRID",          (0,0), (-1,-1), 0, WHITE),
-                ("LEFTPADDING",   (0,0), (0,-1),  0),
-                ("RIGHTPADDING",  (0,0), (0,-1),  12),
-                ("LEFTPADDING",   (1,0), (1,-1),  0),
-                ("RIGHTPADDING",  (1,0), (1,-1),  0),
-                ("TOPPADDING",    (0,0), (-1,-1),  0),
-                ("BOTTOMPADDING", (0,0), (-1,-1),  0),
-                # Thin border around photo
-                ("BOX",           (1,0), (1,-1),  0.5, MGRAY),
-            ]))
-            story.append(ph_tbl)
-            story.append(Spacer(1,8))
-            # Skip the first paragraph below since we embedded it in the table
-            _photo_para_done = True
-        except Exception:
-            _photo_para_done = False
-    else:
-        _photo_para_done = False
+            raw   = _b64.b64decode(photo_b64)
+            # Use ImageReader so ReportLab controls the clipping
+            from reportlab.lib.utils import ImageReader
+            img_reader = ImageReader(io.BytesIO(raw))
+            photo_img  = RLImage(io.BytesIO(raw), width=1.5*inch, height=1.5*inch)
 
-    if not _photo_para_done:
-        story.append(Paragraph(
-            f"This is to certify that <b>{name}</b> is a <b>{estatus} {etype}</b> employee of "
-            f"the <b>{SCHOOL_NAME}</b>, with principal office address at {SCHOOL_ADDRESS}, "
-            f"currently holding the position of <b>{pos}</b>.",ST["legal"]))
+            PHOTO_W = 1.6*inch
+            body_w  = cw - PHOTO_W - 0.1*inch
+
+            # Wrap photo in a pink-bordered cell — padding ensures image sits inside border
+            photo_cell_tbl = Table([[photo_img]], colWidths=[PHOTO_W])
+            photo_cell_tbl.setStyle(TableStyle([
+                ("BOX",           (0,0),(0,0), 1.5, PINK),
+                ("LEFTPADDING",   (0,0),(0,0), 4),
+                ("RIGHTPADDING",  (0,0),(0,0), 4),
+                ("TOPPADDING",    (0,0),(0,0), 4),
+                ("BOTTOMPADDING", (0,0),(0,0), 4),
+                ("VALIGN",        (0,0),(0,0), "MIDDLE"),
+                ("ALIGN",         (0,0),(0,0), "CENTER"),
+            ]))
+
+            row_tbl = Table([[body_para, photo_cell_tbl]],
+                            colWidths=[body_w, PHOTO_W + 0.1*inch])
+            row_tbl.setStyle(TableStyle([
+                ("VALIGN",        (0,0),(-1,-1), "TOP"),
+                ("GRID",          (0,0),(-1,-1), 0, WHITE),
+                ("LEFTPADDING",   (0,0),(0,-1),  0),
+                ("RIGHTPADDING",  (0,0),(0,-1),  10),
+                ("LEFTPADDING",   (1,0),(1,-1),  0),
+                ("RIGHTPADDING",  (1,0),(1,-1),  0),
+                ("TOPPADDING",    (0,0),(-1,-1),  0),
+                ("BOTTOMPADDING", (0,0),(-1,-1),  0),
+            ]))
+            story.append(row_tbl)
+            story.append(Spacer(1,8))
+        except Exception:
+            story.append(body_para)
+            story.append(Spacer(1,8))
+    else:
+        story.append(body_para)
         story.append(Spacer(1,8))
-    
+
     if hired:
         story.append(Paragraph(
             f"He/She has been continuously employed in this institution since <b>{hired}</b> and "
@@ -532,10 +602,6 @@ def build_coe(teacher: dict) -> bytes:
     doc.build(story,onFirstPage=_page_letter,onLaterPages=_page_letter)
     return buf.getvalue()
 
-
-# =============================================================================
-#  APPLICATION FOR LEAVE FORM (matches SEPI official form)
-# =============================================================================
 def build_leave_form(leave: dict) -> bytes:
     """
     Generate a printable Application for Leave Form.
