@@ -46,22 +46,61 @@ HR_KV_BASE = "https://api.cloudflare.com/client/v4"
 
 def _hr_headers():
     try:
-        return {"Authorization": f"Bearer {st.secrets['CF_API_TOKEN']}",
-                "Content-Type": "application/json"}
+        token = st.secrets["CF_API_TOKEN"]
+        return {"Authorization": f"Bearer {token}"} if token else None
     except Exception:
         return None
 
-def _hr_save(key: str, value: dict):
-    """Save a record to SEPI_HR_Payroll KV namespace."""
-    import requests, json
+
+def _hr_kv_verify() -> tuple:
+    """Test actual HR KV connectivity. Returns (ok, message)."""
+    import requests as _req
     hdrs = _hr_headers()
-    if not hdrs: return
-    acct = st.secrets.get("CF_ACCOUNT_ID","")
-    url  = f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}/values/{key}"
+    if not hdrs:
+        return False, "CF_API_TOKEN not set in Streamlit Secrets"
     try:
-        requests.put(url, headers=hdrs, data=json.dumps(value, default=str), timeout=8)
-    except Exception:
-        pass
+        acct = st.secrets.get("CF_ACCOUNT_ID","")
+        if not acct:
+            return False, "CF_ACCOUNT_ID not set"
+        r = _req.get(
+            f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}/keys",
+            headers=hdrs, params={"limit":1}, timeout=8
+        )
+        if r.status_code == 200:
+            return True, f"HR KV connected ({r.json().get('result_info',{}).get('count','?')} records)"
+        elif r.status_code == 401:
+            return False, "Invalid API token — update CF_API_TOKEN in Streamlit Secrets"
+        else:
+            return False, f"HR KV error {r.status_code}"
+    except Exception as e:
+        return False, f"Network error: {str(e)[:80]}"
+
+def _hr_save(key: str, value: dict) -> bool:
+    """Save a record to SEPI_HR_Payroll KV namespace. Returns True on success."""
+    import requests, json as _json
+    hdrs = _hr_headers()
+    if not hdrs:
+        st.warning("⚠️ CF_API_TOKEN missing — HR record not saved to cloud.", icon="☁️")
+        return False
+    try:
+        acct = st.secrets.get("CF_ACCOUNT_ID","")
+        if not acct:
+            st.warning("⚠️ CF_ACCOUNT_ID missing — HR record not saved to cloud.", icon="☁️")
+            return False
+        url = f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}/values/{key}"
+        save_headers = {
+            "Authorization": hdrs["Authorization"],
+            "Content-Type":  "text/plain",
+        }
+        resp = requests.put(url, headers=save_headers,
+                            data=_json.dumps(value, default=str), timeout=10)
+        if resp.status_code not in (200, 201):
+            st.error(f"☁️ KV save failed ({resp.status_code}): {resp.text[:100]}")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"☁️ KV save error: {str(e)[:100]}")
+        return False
 
 def _hr_delete_kv(key: str):
     import requests
@@ -132,6 +171,14 @@ def _gen_teacher_id():
 def _admin_hr():
     _hr_load_all()
     st.title("👨‍🏫 HR & Payroll")
+    # ── Sync button — force reload from KV ──────────────────────────────────
+    sync_col1, sync_col2 = st.columns([3,1])
+    sync_col1.caption("☁️ Data synced from Cloudflare KV")
+    if sync_col2.button("🔄 Sync", key="hr_sync_btn", help="Reload all HR records from Cloudflare KV"):
+        st.session_state.hr_loaded = False
+        st.session_state.leave_loaded = False
+        st.rerun()
+
     hr_tab = st.tabs(["👥 Staff Directory", "💰 Process Payroll",
                        "📋 Payroll History", "📄 Documents", "🏖️ Leave Management"])
 
@@ -664,6 +711,11 @@ def page_payroll_portal():
                         "👥 Staff Directory", "📄 Documents", "🏖️ Leave"],
                        label_visibility="collapsed")
         st.markdown("---")
+        if st.button("🔄 Sync from Cloud", key="payroll_sync", use_container_width=True,
+                     help="Reload all records from Cloudflare KV"):
+            st.session_state.hr_loaded = False
+            st.session_state.leave_loaded = False
+            st.rerun()
         if st.button("🚪 Logout"):
             logout(); st.rerun()
 
