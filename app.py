@@ -26,14 +26,17 @@ try:
         _admin_leave_module
     )
     _HR_MODULE_OK = True
-except ImportError:
+    _HR_IMPORT_ERROR = None
+except Exception as _hr_import_err:
     _HR_MODULE_OK = False
+    _HR_IMPORT_ERROR = str(_hr_import_err)
     def _admin_hr():
-        st.error("⚠️ hr.py not found. Please upload hr.py to your GitHub repo.")
+        st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
+        st.info("Check that hr.py, payroll.py, and hr_pdf.py are all uploaded to GitHub.")
     def page_payroll_portal():
-        st.error("⚠️ hr.py not found. Please upload hr.py to your GitHub repo.")
+        st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
     def _admin_leave_module():
-        st.error("⚠️ hr.py not found.")
+        st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
