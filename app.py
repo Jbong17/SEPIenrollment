@@ -20,6 +20,7 @@ from pdf_gen import build_enrollment_form, build_contract, build_soa
 try:
     from hr import (
         _hr_headers, _hr_save, _hr_delete_kv, _hr_load_all, _gen_teacher_id,
+        _hr_sync_from_kv,
         _admin_hr, _hr_staff_directory, _hr_process_payroll, _show_monthly_payroll,
         _hr_payroll_history, _hr_documents, page_payroll_portal, _payroll_process_tab,
         _payroll_history_tab, _payroll_staff_tab, _payroll_docs_tab,
@@ -37,6 +38,8 @@ except Exception as _hr_import_err:
         st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
     def _admin_leave_module():
         st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
+    def _hr_sync_from_kv():
+        return 0, 0
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -855,18 +858,20 @@ def _admin_dashboard():
             f"and verify `CF_API_TOKEN` and `CF_ACCOUNT_ID` are correct."
         )
     # Sync all data button on dashboard
-    if ds2.button("🔄 Sync All", key="dash_sync_all", help="Force reload ALL records from Cloudflare KV"):
-        st.session_state["_db_loaded"]     = False
-        st.session_state.students          = {}
-        st.session_state.hr_loaded         = False
-        st.session_state.leave_loaded      = False
-        st.session_state.teachers          = {}
-        st.session_state.payroll_runs      = {}
-        st.session_state.leave_records     = {}
-        _db.db_load_students_into_state(force=True)
-        if _HR_MODULE_OK:
-            _hr_load_all()
-        st.success("✅ All records reloaded from Cloudflare KV!")
+    if ds2.button("🔄 Sync All", key="dash_sync_all", help="Merge latest records from Cloudflare KV"):
+        with st.spinner("Syncing from Cloudflare KV..."):
+            # Merge enrollment students from KV (non-destructive)
+            new_students = _db.load_all_students()
+            added_s = 0
+            for tid, rec in new_students.items():
+                if tid not in st.session_state.students:
+                    added_s += 1
+                st.session_state.students[tid] = rec
+            # Merge HR records from KV (non-destructive)
+            added_hr = 0
+            if _HR_MODULE_OK:
+                added_hr, _ = _hr_sync_from_kv()
+        st.success(f"✅ Synced — {added_s} new students, {added_hr} new HR records from KV")
         st.rerun()
 
     # HR KV status — uses same credentials as enrollment KV
