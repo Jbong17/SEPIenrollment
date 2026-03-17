@@ -95,7 +95,7 @@ def load_all_students() -> dict:
         r = requests.get(
             _kv_url(),
             headers=hdrs,
-            params={"prefix": "student:", "limit": 10000},
+            params={"prefix": "student:", "limit": 1000},
             timeout=12
         )
         if r.status_code != 200:
