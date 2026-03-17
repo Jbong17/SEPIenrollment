@@ -59,7 +59,7 @@ def verify_connection() -> tuple:
         r = requests.get(
             f"{KV_BASE_URL}/accounts/{acct}/storage/kv/namespaces/{KV_NAMESPACE_ID}/keys",
             headers=hdrs,
-            params={"limit": 1},
+            params={"limit": 10},
             timeout=8
         )
         if r.status_code == 200:
@@ -95,7 +95,7 @@ def load_all_students() -> dict:
         r = requests.get(
             _kv_url(),
             headers=hdrs,
-            params={"prefix": "student:", "limit": 1000},
+            params={"prefix": "student:", "limit": 10000},
             timeout=12
         )
         if r.status_code != 200:
