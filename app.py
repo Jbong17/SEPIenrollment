@@ -850,10 +850,9 @@ def _admin_dashboard():
             f"Go to: [share.streamlit.io](https://share.streamlit.io) → your app → ⋮ → Settings → Secrets "
             f"and verify `CF_API_TOKEN` and `CF_ACCOUNT_ID` are correct."
         )
-    # HR KV status
-    hr_ok, hr_msg = _hr_kv_verify() if _HR_MODULE_OK else (False, "HR module not loaded")
-    if not hr_ok:
-        st.error(f"🔴 **HR Payroll KV NOT saving** — {hr_msg}")
+    # HR KV status — uses same credentials as enrollment KV
+    if not kv_ok and _HR_MODULE_OK:
+        st.error("🔴 **HR Payroll KV also affected** — fix the CF_API_TOKEN above to restore HR persistence.")
     c1,c2,c3,c4 = st.columns(4)
     c1.metric("Total Enrolled",     len(ss))
     c2.metric("Pending",            sum(1 for s in ss.values() if s.get("status")=="pending"))
