@@ -842,17 +842,33 @@ def page_admin():
 def _admin_dashboard():
     ss = st.session_state.students
     st.title("📊 Dashboard")
-    # Database connection — live test
+    # Database connection — live test + Sync
     kv_ok, kv_msg = _db.verify_connection()
+    ds1, ds2 = st.columns([5,1])
     if kv_ok:
-        st.success(f"☁️ **Cloudflare KV connected** — {kv_msg}. All records persist across devices.")
+        ds1.success(f"☁️ **Cloudflare KV connected** — {kv_msg}. All records persist across devices.")
     else:
-        st.error(
+        ds1.error(
             f"🔴 **Cloudflare KV NOT saving** — {kv_msg}\n\n"
             f"**Records entered on this device will NOT appear on other devices until this is fixed.**\n\n"
             f"Go to: [share.streamlit.io](https://share.streamlit.io) → your app → ⋮ → Settings → Secrets "
             f"and verify `CF_API_TOKEN` and `CF_ACCOUNT_ID` are correct."
         )
+    # Sync all data button on dashboard
+    if ds2.button("🔄 Sync All", key="dash_sync_all", help="Force reload ALL records from Cloudflare KV"):
+        st.session_state["_db_loaded"]     = False
+        st.session_state.students          = {}
+        st.session_state.hr_loaded         = False
+        st.session_state.leave_loaded      = False
+        st.session_state.teachers          = {}
+        st.session_state.payroll_runs      = {}
+        st.session_state.leave_records     = {}
+        _db.db_load_students_into_state(force=True)
+        if _HR_MODULE_OK:
+            _hr_load_all()
+        st.success("✅ All records reloaded from Cloudflare KV!")
+        st.rerun()
+
     # HR KV status — uses same credentials as enrollment KV
     if not kv_ok and _HR_MODULE_OK:
         st.error("🔴 **HR Payroll KV also affected** — fix the CF_API_TOKEN above to restore HR persistence.")
