@@ -790,3 +790,277 @@ def build_soa(s: dict) -> bytes:
 
     doc.build(story, onFirstPage=_draw_page, onLaterPages=_draw_page)
     return buf.getvalue()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  PROMISSORY NOTE  (Regular or Notarized depending on balance)
+#  Threshold: balance > PHP 15,000 → Notarized | ≤ PHP 15,000 → Regular
+# ══════════════════════════════════════════════════════════════════════════════
+NOTARIZED_THRESHOLD = 15_000.0
+
+def build_promissory_note(s: dict) -> bytes:
+    """
+    Generate a Promissory Note PDF for a student with unpaid balance.
+    - balance > PHP 15,000 → NOTARIZED PROMISSORY NOTE
+    - balance ≤ PHP 15,000 → REGULAR PROMISSORY NOTE
+    Both include: student info, amount, payment schedule, signatures.
+    Notarized version adds acknowledgement and notary block.
+    """
+    buf   = io.BytesIO()
+    doc   = SimpleDocTemplate(buf, pagesize=LONG_BOND,
+                              leftMargin=MARGIN, rightMargin=MARGIN,
+                              topMargin=MARGIN, bottomMargin=MARGIN)
+    story = []
+    S     = ST
+
+    # ── Computed values ───────────────────────────────────────────────────────
+    total    = float(s.get("totalFees", 0) or 0)
+    paid     = float(s.get("paidAmount", 0) or 0)
+    balance  = round(total - paid, 2)
+    notarized = balance > NOTARIZED_THRESHOLD
+
+    name     = f"{s.get('lastName','')}, {s.get('firstName','')} {s.get('middleName','')}".strip()
+    grade    = s.get("grade", "")
+    level    = LEVEL_LABEL.get(s.get("level",""), "")
+    tid      = s.get("trackingId","")
+    sy       = s.get("schoolYear", SCHOOL_YEAR)
+    pn_type  = "NOTARIZED PROMISSORY NOTE" if notarized else "PROMISSORY NOTE"
+
+    # Payment schedule (compute installments)
+    pn_schedule = s.get("pnSchedule", [])  # user-defined schedule if present
+    if not pn_schedule:
+        # Default: 3 equal installments across the school year
+        inst = round(balance / 3, 2)
+        pn_schedule = [
+            {"due": "October 31, 2026",  "amount": inst},
+            {"due": "January 31, 2027",  "amount": inst},
+            {"due": "March 31, 2027",    "amount": round(balance - inst*2, 2)},
+        ]
+
+    guardian = (s.get("guardianName") or s.get("fatherName") or
+                s.get("motherName") or "").strip()
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    story.append(_logo_header(sy))
+    story.append(_hline())
+    story.append(Spacer(1, 4))
+
+    # Document type title
+    title_style = ParagraphStyle("pn_title", fontName="Helvetica-Bold", fontSize=14,
+                                  textColor=C_PINK, alignment=TA_CENTER, leading=18, spaceAfter=3)
+    story.append(Paragraph(pn_type, title_style))
+
+    # Reference box
+    ref_tbl = Table([[
+        Paragraph(f"Tracking ID: <b>{tid}</b>",
+                  ParagraphStyle("_ref", fontName="Helvetica", fontSize=8,
+                                 textColor=C_NAVY, alignment=TA_LEFT)),
+        Paragraph(f"Date: <b>{__import__('datetime').date.today().strftime('%B %d, %Y')}</b>",
+                  ParagraphStyle("_ref2", fontName="Helvetica", fontSize=8,
+                                 textColor=C_NAVY, alignment=TA_RIGHT)),
+    ]], colWidths=[CW/2, CW/2])
+    ref_tbl.setStyle(TableStyle([
+        ("GRID", (0,0),(-1,-1), 0, C_WHITE),
+        ("LEFTPADDING",(0,0),(-1,-1),0),
+        ("RIGHTPADDING",(0,0),(-1,-1),0),
+    ]))
+    story.append(ref_tbl)
+    story.append(Spacer(1, 8))
+    story.append(_hline())
+    story.append(Spacer(1, 8))
+
+    # ── Student details ───────────────────────────────────────────────────────
+    story.append(_sec("STUDENT INFORMATION"))
+    story.append(Spacer(1, 4))
+    story.append(_row2("Student Name", name, "Tracking ID", tid))
+    story.append(_row2("Grade Level", f"{level} — {grade}", "School Year", sy))
+    story.append(_row2("Parent/Guardian", guardian, "Contact", s.get("phone","")))
+
+    story.append(Spacer(1, 8))
+    story.append(_sec("FINANCIAL SUMMARY"))
+    story.append(Spacer(1, 4))
+
+    fee_rows = [
+        [_lbl("Total School Fees"),     _val(f"PHP {total:,.2f}"),
+         _lbl("Amount Paid"),           _val(f"PHP {paid:,.2f}")],
+        [_lbl("Outstanding Balance"),   _val(f"PHP {balance:,.2f}"),
+         _lbl("Note Type"),             _val(pn_type)],
+    ]
+    fee_tbl = Table(fee_rows, colWidths=[LW2, VW2, LW2, VW2])
+    fee_tbl.setStyle(TableStyle(_BASE_TS + [
+        ("BACKGROUND", (0,0), (0,-1), C_PINK_LT),
+        ("BACKGROUND", (2,0), (2,-1), C_PINK_LT),
+        ("FONTNAME",   (0,0), (0,-1), "Helvetica-Bold"),
+        ("FONTNAME",   (2,0), (2,-1), "Helvetica-Bold"),
+        ("TEXTCOLOR",  (0,0), (0,-1), C_PINK),
+        ("TEXTCOLOR",  (2,0), (2,-1), C_PINK),
+        # Highlight balance row
+        ("BACKGROUND", (1,1), (1,1), colors.HexColor("#FCE4EC")),
+        ("FONTNAME",   (1,1), (1,1), "Helvetica-Bold"),
+    ]))
+    story.append(fee_tbl)
+
+    story.append(Spacer(1, 8))
+    story.append(_sec("PAYMENT SCHEDULE"))
+    story.append(Spacer(1, 4))
+
+    sched_rows = [["No.", "Due Date", "Amount", "Remarks"]]
+    for i, inst_item in enumerate(pn_schedule, 1):
+        sched_rows.append([
+            str(i),
+            inst_item.get("due",""),
+            f"PHP {float(inst_item.get('amount',0)):,.2f}",
+            inst_item.get("remarks",""),
+        ])
+    sched_rows.append(["", "TOTAL BALANCE", f"PHP {balance:,.2f}", ""])
+
+    sched_tbl = Table(sched_rows, colWidths=[0.4*inch, 2.2*inch, 1.8*inch, 2.6*inch])
+    sched_tbl.setStyle(TableStyle(_BASE_TS + [
+        ("BACKGROUND",  (0,0), (-1,0), C_PINK),
+        ("TEXTCOLOR",   (0,0), (-1,0), C_WHITE),
+        ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+        ("ALIGN",       (0,0), (-1,-1), "CENTER"),
+        ("ALIGN",       (2,0), (2,-1), "RIGHT"),
+        ("ALIGN",       (3,0), (3,-1), "LEFT"),
+        ("BACKGROUND",  (0,-1), (-1,-1), C_PINK_LT),
+        ("FONTNAME",    (0,-1), (-1,-1), "Helvetica-Bold"),
+        ("TEXTCOLOR",   (0,-1), (-1,-1), C_PINK),
+    ]))
+    story.append(sched_tbl)
+
+    story.append(Spacer(1, 10))
+    story.append(_sec("UNDERTAKING"))
+    story.append(Spacer(1, 6))
+
+    # Body text
+    fname_disp = f"{s.get('firstName','')} {s.get('lastName','')}".strip()
+    body = (
+        f"I, <b>{guardian or fname_disp}</b>, parent/guardian of <b>{fname_disp}</b>, "
+        f"a student of <b>{SCHOOL_NAME}</b> for School Year <b>{sy}</b>, "
+        f"hereby acknowledge and promise to pay the outstanding balance of "
+        f"<b>PHP {balance:,.2f} ({_amount_in_words(balance)} Pesos)</b>, "
+        f"representing the unpaid school fees for the said school year, "
+        f"in accordance with the payment schedule set forth above."
+    )
+    story.append(Paragraph(body, S["legal"]))
+    story.append(Spacer(1, 4))
+
+    conditions = [
+        "I understand that failure to pay on the scheduled dates may result in the withholding "
+        "of report cards, clearances, and other school documents.",
+        "I understand that the student's enrollment for the succeeding school year may be "
+        "withheld until all outstanding obligations are fully settled.",
+        "I agree that this Promissory Note shall be legally binding and enforceable.",
+    ]
+    if notarized:
+        conditions.append(
+            "I further understand that this is a NOTARIZED PROMISSORY NOTE and carries the "
+            "full force and effect of a legal instrument once acknowledged before a Notary Public."
+        )
+    for i, cond in enumerate(conditions, 1):
+        story.append(Paragraph(f"{i}. {cond}", S["legal"]))
+
+    story.append(Spacer(1, 16))
+
+    # ── Signatures ────────────────────────────────────────────────────────────
+    _csig = ParagraphStyle("_sg", fontName="Helvetica", fontSize=8,
+                             textColor=C_GRAY, alignment=TA_CENTER)
+    _cdate = ParagraphStyle("_sd", fontName="Helvetica", fontSize=8,
+                              textColor=C_NAVY, alignment=TA_CENTER)
+    sig_data = [
+        ["_______________________________", "", "_______________________________"],
+        [Paragraph(guardian or "Parent / Guardian", S["witness"]), "",
+         Paragraph("School Principal", S["witness"])],
+        [Paragraph("Parent / Guardian", _csig), "",
+         Paragraph("School Principal", _csig)],
+        [Paragraph("Date: __________________", _cdate), "",
+         Paragraph("Date: __________________", _cdate)],
+    ]
+    sig_tbl = Table(sig_data, colWidths=[CW*0.42, CW*0.16, CW*0.42])
+    sig_tbl.setStyle(TableStyle([
+        ("GRID", (0,0),(-1,-1), 0, C_WHITE),
+        ("ALIGN", (0,0),(-1,-1), "CENTER"),
+        ("TOPPADDING", (0,0),(-1,-1), 4),
+        ("BOTTOMPADDING", (0,0),(-1,-1), 4),
+    ]))
+    story.append(sig_tbl)
+
+    # ── Notary block (only for notarized) ─────────────────────────────────────
+    if notarized:
+        story.append(Spacer(1, 12))
+        story.append(_hline())
+        story.append(Spacer(1, 6))
+        story.append(_sec("ACKNOWLEDGEMENT (FOR NOTARY PUBLIC)"))
+        story.append(Spacer(1, 6))
+
+        ack_text = (
+            f"REPUBLIC OF THE PHILIPPINES<br/>"
+            f"CITY/MUNICIPALITY OF __________________________<br/><br/>"
+            f"BEFORE ME, a Notary Public for and in the above jurisdiction, personally appeared "
+            f"<b>{guardian or '______________________________'}</b> with "
+            f"Competent Evidence of Identity as follows:<br/><br/>"
+            f"<b>Name:</b> {guardian or '______________________________'}&nbsp;&nbsp;&nbsp;&nbsp;"
+            f"<b>ID Type/No.:</b> ______________________________&nbsp;&nbsp;&nbsp;&nbsp;"
+            f"<b>Date Issued:</b> ______________<br/><br/>"
+            f"known to me to be the same person who executed the foregoing instrument and "
+            f"acknowledged to me that the same is his/her free and voluntary act and deed.<br/><br/>"
+            f"This instrument refers to a <b>Promissory Note</b> consisting of this page only.<br/><br/>"
+            f"WITNESS MY HAND AND SEAL on the _____ day of ______________, 20___ "
+            f"at _______________________________, Philippines."
+        )
+        story.append(Paragraph(ack_text, S["legal"]))
+        story.append(Spacer(1, 20))
+
+        notary_data = [
+            ["", "_________________________________"],
+            ["", "NOTARY PUBLIC"],
+            ["", "PTR No.: ________________"],
+            ["", "IBP No.: ________________"],
+            ["", "Roll No.: ________________"],
+            ["", "MCLE Compliance: ________________"],
+            ["", "Commission Expires: ________________"],
+        ]
+        notary_tbl = Table(notary_data, colWidths=[CW*0.5, CW*0.5])
+        notary_tbl.setStyle(TableStyle([
+            ("GRID", (0,0),(-1,-1), 0, C_WHITE),
+            ("ALIGN", (1,0),(-1,-1), "CENTER"),
+            ("TOPPADDING", (0,0),(-1,-1), 3),
+            ("FONTNAME", (1,1),(1,1), "Helvetica-Bold"),
+        ]))
+        story.append(notary_tbl)
+
+    # ── Footer note ───────────────────────────────────────────────────────────
+    story.append(Spacer(1, 10))
+    story.append(_hline())
+    footer_style = ParagraphStyle("_fn", fontName="Helvetica-Oblique", fontSize=7.5,
+                                   textColor=C_GRAY, alignment=TA_CENTER)
+    story.append(Paragraph(
+        f"\"Leading Lifelong Learners\" · {SCHOOL_NAME} · {SCHOOL_ADDRESS} · "
+        f"{SCHOOL_EMAIL} · {SCHOOL_PHONE}", footer_style))
+
+    doc.build(story, onFirstPage=_draw_page, onLaterPages=_draw_page)
+    return buf.getvalue()
+
+
+def _amount_in_words(amount: float) -> str:
+    """Convert a peso amount to words (simplified)."""
+    try:
+        n = int(round(amount))
+        ones = ["","One","Two","Three","Four","Five","Six","Seven","Eight","Nine",
+                "Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen",
+                "Seventeen","Eighteen","Nineteen"]
+        tens = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"]
+        def say(n):
+            if n == 0: return ""
+            elif n < 20: return ones[n]
+            elif n < 100: return tens[n//10] + (" " + ones[n%10] if n%10 else "")
+            elif n < 1000: return ones[n//100] + " Hundred" + (" and " + say(n%100) if n%100 else "")
+            elif n < 100000: return say(n//1000) + " Thousand" + (" " + say(n%1000) if n%1000 else "")
+            else: return f"{n:,}"
+        result = say(n)
+        cents = round((amount - n) * 100)
+        if cents:
+            result += f" and {cents:02d}/100"
+        return result or "Zero"
+    except Exception:
+        return f"{amount:,.2f}"
