@@ -169,14 +169,20 @@ def _gen_teacher_id():
 
 # ── MAIN HR PAGE ───────────────────────────────────────────────────────────────
 def _admin_hr():
+    # Always attempt load (will skip if already loaded unless flag was reset by Sync)
     _hr_load_all()
     st.title("👨‍🏫 HR & Payroll")
     # ── Sync button — force reload from KV ──────────────────────────────────
     sync_col1, sync_col2 = st.columns([3,1])
-    sync_col1.caption("☁️ Data synced from Cloudflare KV")
+    n_teachers = len(st.session_state.teachers)
+    n_payroll  = len(st.session_state.payroll_runs)
+    sync_col1.caption(f"☁️ Loaded from KV: **{n_teachers}** staff · **{n_payroll}** payroll runs")
     if sync_col2.button("🔄 Sync", key="hr_sync_btn", help="Reload all HR records from Cloudflare KV"):
-        st.session_state.hr_loaded = False
-        st.session_state.leave_loaded = False
+        st.session_state.hr_loaded     = False
+        st.session_state.leave_loaded  = False
+        st.session_state.teachers      = {}
+        st.session_state.payroll_runs  = {}
+        st.session_state.leave_records = {}
         st.rerun()
 
     hr_tab = st.tabs(["👥 Staff Directory", "💰 Process Payroll",
@@ -713,8 +719,11 @@ def page_payroll_portal():
         st.markdown("---")
         if st.button("🔄 Sync from Cloud", key="payroll_sync", use_container_width=True,
                      help="Reload all records from Cloudflare KV"):
-            st.session_state.hr_loaded = False
+            st.session_state.hr_loaded    = False
             st.session_state.leave_loaded = False
+            st.session_state.teachers     = {}
+            st.session_state.payroll_runs = {}
+            st.session_state.leave_records = {}
             st.rerun()
         if st.button("🚪 Logout"):
             logout(); st.rerun()
