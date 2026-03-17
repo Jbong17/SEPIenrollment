@@ -579,8 +579,17 @@ def page_enroll():
             tuition_base = fdata_preview["lines"].get("Tuition Fee",0)
             if fdata_preview.get("discount"):
                 disc_info = fdata_preview["discount"]
-                pc1.metric("Tuition Fee (Original)", f"₱{disc_info['base_tuition']:,.2f}")
-                pc2.metric(f"Discount ({disc_info['rate']}%)", f"-₱{disc_info['amount']:,.2f}", delta=f"-{disc_info['rate']}%")
+                disc_rate  = disc_info.get("rate")       # None for ESC (fixed amount)
+                disc_amt   = disc_info.get("amount", 0)
+                disc_label = disc_info.get("label", "Discount")
+                disc_base  = disc_info.get("base_tuition", tuition_base)
+                pc1.metric("Tuition Fee (Original)", f"₱{disc_base:,.2f}")
+                if disc_rate is not None:
+                    pc2.metric(f"{disc_label} ({disc_rate}%)",
+                               f"-₱{disc_amt:,.2f}", delta=f"-{disc_rate}%")
+                else:
+                    pc2.metric(disc_label, f"-₱{disc_amt:,.2f}",
+                               delta=f"-₱{disc_amt:,.2f}")
                 pc3.metric("Total After Discount", f"₱{fdata_preview['total']:,.2f}")
             else:
                 pc1.metric("Tuition Fee", f"₱{tuition_base:,.2f}")
@@ -1024,9 +1033,11 @@ def _admin_students():
                     if k == "Tuition Fee" and disc_info_v:
                         d_base = disc_info_v.get("base_tuition", v)
                         d_amt  = disc_info_v.get("amount", 0)
-                        d_rate = disc_info_v.get("rate", 0)
+                        d_rate = disc_info_v.get("rate")
+                        d_lbl  = disc_info_v.get("label","Discount")
+                        rate_str = f" ({d_rate}%)" if d_rate is not None else ""
                         fee_rows.append({"Particular": "Tuition Fee (Gross)", "Amount": f"₱{d_base:,.2f}", "Note": ""})
-                        fee_rows.append({"Particular": f"  Discount: {disc_info_v.get('label','')} ({d_rate}%)", "Amount": f"(₱{d_amt:,.2f})", "Note": "Applied"})
+                        fee_rows.append({"Particular": f"  {d_lbl}{rate_str}", "Amount": f"(₱{d_amt:,.2f})", "Note": "Applied"})
                         fee_rows.append({"Particular": "Tuition Fee (Net)", "Amount": f"₱{v:,.2f}", "Note": ""})
                     else:
                         fee_rows.append({"Particular": k, "Amount": f"₱{v:,.2f}", "Note": ""})
