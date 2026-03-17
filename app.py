@@ -20,7 +20,6 @@ from pdf_gen import build_enrollment_form, build_contract, build_soa
 try:
     from hr import (
         _hr_headers, _hr_save, _hr_delete_kv, _hr_load_all, _gen_teacher_id,
-        _hr_sync_from_kv,
         _admin_hr, _hr_staff_directory, _hr_process_payroll, _show_monthly_payroll,
         _hr_payroll_history, _hr_documents, page_payroll_portal, _payroll_process_tab,
         _payroll_history_tab, _payroll_staff_tab, _payroll_docs_tab,
@@ -38,8 +37,6 @@ except Exception as _hr_import_err:
         st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
     def _admin_leave_module():
         st.error(f"⚠️ HR module error: {_HR_IMPORT_ERROR}")
-    def _hr_sync_from_kv():
-        return 0, 0
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -199,6 +196,52 @@ if "enroll_step"not in st.session_state: st.session_state.enroll_step= 1
 if "form_data"  not in st.session_state: st.session_state.form_data  = {}
 
 peso = lambda n: f"₱{float(n or 0):,.2f}"
+
+def _hr_sync_from_kv():
+    """Merge HR records from Cloudflare KV into session state (non-destructive)."""
+    import requests as _req, json as _json
+    try:
+        token = st.secrets["CF_API_TOKEN"]
+        acct  = st.secrets["CF_ACCOUNT_ID"]
+    except Exception:
+        return 0, 0
+    HR_NS = "dfe32c5ff0924b199cea8e36f588f6c4"
+    base  = f"https://api.cloudflare.com/client/v4/accounts/{acct}/storage/kv/namespaces/{HR_NS}"
+    hdrs  = {"Authorization": f"Bearer {token}"}
+    try:
+        r = _req.get(f"{base}/keys", headers=hdrs, params={"limit": 1000}, timeout=12)
+        if r.status_code != 200:
+            return 0, 0
+        keys = [item["name"] for item in r.json().get("result", [])]
+        added = 0
+        for key in keys:
+            rv = _req.get(f"{base}/values/{key}", headers=hdrs, timeout=8)
+            if rv.status_code != 200:
+                continue
+            try:
+                record = rv.json()
+            except Exception:
+                continue
+            if key.startswith("teacher:"):
+                tid = key.replace("teacher:", "")
+                is_new = tid not in st.session_state.teachers
+                st.session_state.teachers[tid] = record
+                if is_new: added += 1
+            elif key.startswith("payroll:"):
+                is_new = key not in st.session_state.payroll_runs
+                st.session_state.payroll_runs[key] = record
+                if is_new: added += 1
+            elif key.startswith("leave:"):
+                if "leave_records" not in st.session_state:
+                    st.session_state.leave_records = {}
+                is_new = key not in st.session_state.leave_records
+                st.session_state.leave_records[key] = record
+                if is_new: added += 1
+        st.session_state.hr_loaded = True
+        return added, len(keys) - added
+    except Exception:
+        return 0, 0
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def gen_id():
