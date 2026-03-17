@@ -1,22 +1,10 @@
 """
 SEPI Database Layer — Cloudflare KV Persistence
 ================================================
-All student records are stored in Cloudflare KV so they survive
-Streamlit hibernation, restarts, and redeployments.
+Enrollment records stored in SEPI_Enrollment_Database KV namespace.
+Key format: student:{TRACKING_ID}
 
-KV Key scheme:
-  student:{TRACKING_ID}   →  full student JSON record
-  index:all               →  list of all tracking IDs
-
-Requires Streamlit Secrets:
-  CF_API_TOKEN  = "your-cloudflare-api-token"
-  CF_ACCOUNT_ID = "your-cloudflare-account-id"
-
-How to get those values:
-  CF_ACCOUNT_ID → Cloudflare dashboard → right sidebar → Account ID
-  CF_API_TOKEN  → Cloudflare dashboard → My Profile → API Tokens
-                  → Create Token → "Edit Cloudflare Workers" template
-                  (needs KV:Read + KV:Write + Account:Read permissions)
+IMPORTANT: Uses Content-Type: text/plain for KV writes (CF KV requirement).
 """
 
 import json, requests, streamlit as st
@@ -27,17 +15,21 @@ KV_BASE_URL     = "https://api.cloudflare.com/client/v4"
 
 
 def _headers() -> Optional[dict]:
-    """Return auth headers, or None if not configured."""
     try:
         token = st.secrets["CF_API_TOKEN"]
-        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        if not token:
+            return None
+        return {
+            "Authorization": f"Bearer {token}",
+        }
     except Exception:
         return None
 
 
 def _account_id() -> Optional[str]:
     try:
-        return st.secrets["CF_ACCOUNT_ID"]
+        aid = st.secrets["CF_ACCOUNT_ID"]
+        return aid if aid else None
     except Exception:
         return None
 
@@ -49,14 +41,40 @@ def _kv_url(key: str = "") -> str:
 
 
 def is_configured() -> bool:
-    """True if Cloudflare credentials are available in Streamlit Secrets."""
     return _headers() is not None and _account_id() is not None
 
 
-# ── Read ──────────────────────────────────────────────────────────────────────
+def verify_connection() -> tuple:
+    """
+    Test actual KV connectivity. Returns (ok: bool, message: str).
+    Call this from the dashboard to show real connection status.
+    """
+    hdrs = _headers()
+    if not hdrs:
+        return False, "CF_API_TOKEN not set in Streamlit Secrets"
+    acct = _account_id()
+    if not acct:
+        return False, "CF_ACCOUNT_ID not set in Streamlit Secrets"
+    try:
+        r = requests.get(
+            f"{KV_BASE_URL}/accounts/{acct}/storage/kv/namespaces/{KV_NAMESPACE_ID}/keys",
+            headers=hdrs,
+            params={"limit": 1},
+            timeout=8
+        )
+        if r.status_code == 200:
+            return True, f"Connected — {r.json().get('result_info', {}).get('count', '?')} records"
+        elif r.status_code == 401:
+            return False, "Invalid API token — update CF_API_TOKEN in Streamlit Secrets"
+        elif r.status_code == 403:
+            return False, "Token lacks KV permissions — recreate token with Workers KV:Edit"
+        else:
+            return False, f"KV error {r.status_code}: {r.text[:100]}"
+    except Exception as e:
+        return False, f"Network error: {str(e)[:100]}"
+
 
 def get_student(tracking_id: str) -> Optional[dict]:
-    """Fetch a single student record from KV."""
     hdrs = _headers()
     if not hdrs:
         return None
@@ -70,48 +88,34 @@ def get_student(tracking_id: str) -> Optional[dict]:
 
 
 def load_all_students() -> dict:
-    """
-    Load all student records from KV into a dict keyed by trackingId.
-    Falls back to {} if credentials not configured or on any error.
-    """
     hdrs = _headers()
     if not hdrs:
         return {}
     try:
-        # 1. Get the list of all keys
         r = requests.get(
             _kv_url(),
             headers=hdrs,
             params={"prefix": "student:", "limit": 1000},
-            timeout=10
+            timeout=12
         )
         if r.status_code != 200:
             return {}
-
-        keys_data = r.json()
-        keys = [item["name"] for item in keys_data.get("result", [])]
-
-        # 2. Fetch each student record
+        keys = [item["name"] for item in r.json().get("result", [])]
         students = {}
         for key in keys:
-            tracking_id = key.replace("student:", "")
-            record = get_student(tracking_id)
-            if record:
-                students[tracking_id] = record
-
+            tid = key.replace("student:", "")
+            r2  = requests.get(_kv_url(key), headers=hdrs, timeout=8)
+            if r2.status_code == 200:
+                try:
+                    students[tid] = r2.json()
+                except Exception:
+                    pass
         return students
-
     except Exception:
         return {}
 
 
-# ── Write ─────────────────────────────────────────────────────────────────────
-
 def save_student(student: dict) -> bool:
-    """
-    Save / update a single student record to KV.
-    Returns True on success.
-    """
     hdrs = _headers()
     if not hdrs:
         return False
@@ -119,11 +123,13 @@ def save_student(student: dict) -> bool:
     if not tid:
         return False
     try:
+        # CF KV requires text/plain for value writes
+        write_headers = {**hdrs, "Content-Type": "text/plain"}
         r = requests.put(
             _kv_url(f"student:{tid}"),
-            headers={**hdrs, "Content-Type": "application/json"},
+            headers=write_headers,
             data=json.dumps(student, default=str),
-            timeout=8
+            timeout=10
         )
         return r.status_code in (200, 201)
     except Exception:
@@ -131,7 +137,6 @@ def save_student(student: dict) -> bool:
 
 
 def delete_student(tracking_id: str) -> bool:
-    """Delete a student record from KV."""
     hdrs = _headers()
     if not hdrs:
         return False
@@ -142,50 +147,30 @@ def delete_student(tracking_id: str) -> bool:
         return False
 
 
-# ── Streamlit helpers — call these instead of touching session_state directly ─
-
 def db_load_students_into_state():
-    """
-    On app startup: load all students from KV into st.session_state.students.
-    If KV not configured, keeps whatever is already in session_state.
-    """
     if not is_configured():
-        return  # graceful fallback — session_state already initialised to {}
-
-    # Only load once per session (avoid re-fetching on every rerun)
+        return
     if st.session_state.get("_db_loaded"):
         return
-
-    with st.spinner("Loading student records…"):
-        students = load_all_students()
-
-    # Merge KV data into session state
-    # (session_state records take priority if they're newer — same session edits)
+    students = load_all_students()
     for tid, record in students.items():
         if tid not in st.session_state.students:
             st.session_state.students[tid] = record
-
     st.session_state["_db_loaded"] = True
 
 
 def db_save(student: dict):
-    """
-    Save student to BOTH session_state AND Cloudflare KV.
-    This is the single write function to call everywhere.
-    """
     tid = student.get("trackingId")
     if not tid:
         return
     st.session_state.students[tid] = student
     if is_configured():
-        save_student(student)
+        ok = save_student(student)
+        if not ok:
+            st.warning(f"⚠️ Could not save {tid} to cloud. Check Cloudflare credentials in Streamlit Secrets.", icon="☁️")
 
 
 def db_update_field(tracking_id: str, **fields):
-    """
-    Update specific fields on a student record and persist.
-    Usage: db_update_field("SEPI-ABC", status="approved", paidAmount=5000)
-    """
     s = st.session_state.students.get(tracking_id)
     if not s:
         return
