@@ -111,14 +111,20 @@ def _hr_delete_kv(key: str):
     try: requests.delete(url, headers=hdrs, timeout=8)
     except Exception: pass
 
-def _hr_load_all():
+def _hr_load_all(force: bool = False):
     """
     Load all HR/Payroll records from Cloudflare KV into session state.
-    Called once per session. Loads: teachers, payroll_runs, leave_records.
+    If force=True, clears existing data first for a clean reload.
+    Called once per session unless forced.
     """
     import requests, json as _json
-    if st.session_state.hr_loaded:
+    if st.session_state.hr_loaded and not force:
         return
+    if force:
+        st.session_state.teachers     = {}
+        st.session_state.payroll_runs = {}
+        if "leave_records" in st.session_state:
+            st.session_state.leave_records = {}
     hdrs = _hr_headers()
     if not hdrs:
         # No credentials — work in-memory only
@@ -132,7 +138,7 @@ def _hr_load_all():
     base = f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}"
     try:
         r = requests.get(f"{base}/keys", headers=hdrs,
-                         params={"limit": 10000}, timeout=12)
+                         params={"limit": 1000}, timeout=12)
         if r.status_code != 200:
             st.session_state.hr_loaded = True
             return
@@ -178,7 +184,9 @@ def _admin_hr():
     n_payroll  = len(st.session_state.payroll_runs)
     sync_col1.caption(f"☁️ Loaded from KV: **{n_teachers}** staff · **{n_payroll}** payroll runs")
     if sync_col2.button("🔄 Sync", key="hr_sync_btn", help="Reload all HR records from Cloudflare KV"):
-        st.session_state.hr_loaded = False
+        _hr_load_all(force=True)   # clear + reload from KV
+        n_after = len(st.session_state.teachers)
+        sync_col1.success(f"✅ Synced — {n_after} staff loaded from KV")
         st.rerun()
 
     hr_tab = st.tabs(["👥 Staff Directory", "💰 Process Payroll",
@@ -716,6 +724,8 @@ def page_payroll_portal():
         if st.button("🔄 Sync from Cloud", key="payroll_sync", use_container_width=True,
                      help="Reload all records from Cloudflare KV"):
             st.session_state.hr_loaded = False
+            _hr_load_all()   # runs immediately
+            st.success(f"✅ Synced — {len(st.session_state.teachers)} staff loaded from KV")
             st.rerun()
         if st.button("🚪 Logout"):
             logout(); st.rerun()
@@ -1052,7 +1062,7 @@ def _admin_leave_module():
             base = f"https://api.cloudflare.com/client/v4/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}"
             try:
                 r = requests.get(f"{base}/keys", headers=hdrs,
-                                 params={"prefix":"leave:","limit": 10000}, timeout=10)
+                                 params={"prefix":"leave:","limit": 1000}, timeout=10)
                 if r.status_code == 200:
                     for item in r.json().get("result",[]):
                         rv = requests.get(f"{base}/values/{item['name']}", headers=hdrs, timeout=8)
