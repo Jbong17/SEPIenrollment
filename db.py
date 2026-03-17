@@ -147,15 +147,19 @@ def delete_student(tracking_id: str) -> bool:
         return False
 
 
-def db_load_students_into_state():
+def db_load_students_into_state(force: bool = False):
+    """Load students from KV into session state.
+    If force=True, clears existing state and reloads everything from KV.
+    """
     if not is_configured():
         return
-    if st.session_state.get("_db_loaded"):
+    if st.session_state.get("_db_loaded") and not force:
         return
+    if force:
+        st.session_state.students = {}
     students = load_all_students()
     for tid, record in students.items():
-        if tid not in st.session_state.students:
-            st.session_state.students[tid] = record
+        st.session_state.students[tid] = record
     st.session_state["_db_loaded"] = True
 
 
