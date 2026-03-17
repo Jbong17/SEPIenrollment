@@ -174,15 +174,17 @@ if "soa_update_id" not in st.session_state: st.session_state.soa_update_id = Non
 # Load student records from Cloudflare KV on first run
 _db.db_load_students_into_state()
 
-# Load HR/Payroll records from Cloudflare KV on first run
-if _HR_MODULE_OK:
-    _hr_load_all()
-
-# HR / Payroll session state
+# HR / Payroll session state — must be initialized BEFORE calling _hr_load_all()
 if "teachers"       not in st.session_state: st.session_state.teachers       = {}
 if "payroll_runs"   not in st.session_state: st.session_state.payroll_runs   = {}
 if "hr_loaded"      not in st.session_state: st.session_state.hr_loaded      = False
 if "hr_active_tid"  not in st.session_state: st.session_state.hr_active_tid  = None
+if "leave_records"  not in st.session_state: st.session_state.leave_records  = {}
+if "leave_loaded"   not in st.session_state: st.session_state.leave_loaded   = False
+
+# Load HR/Payroll records from Cloudflare KV on first run (after session state init)
+if _HR_MODULE_OK:
+    _hr_load_all()
 if "user_type"      not in st.session_state: st.session_state.user_type      = None  # 'admin'|'payroll'|'student'
 if "page"       not in st.session_state: st.session_state.page       = "login"
 if "user"       not in st.session_state: st.session_state.user       = None
