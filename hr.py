@@ -369,7 +369,7 @@ def _hr_process_payroll():
         if st.button("🔄 Re-process (overwrite)", key="reprocess_pr"):
             del st.session_state.payroll_runs[run_key]
             st.rerun()
-        _show_payroll_run(existing, cutoff_label)
+        _show_payroll_run(existing, cutoff_label, caller="process")
         return
 
     # ── Input form per teacher ────────────────────────────────────────────────
@@ -530,7 +530,7 @@ def _hr_payroll_history():
         run = runs[key]
         label = run.get("cutoffLabel","")
         with st.expander(f"**{label}** — {len(run.get('results',{}))} staff | Net: {peso(run.get('totalNetPay',0))} | Processed: {run.get('processedOn','')[:10]}"):
-            _show_payroll_run(run, label)
+            _show_payroll_run(run, label, caller=f"hist_{key}")
 
 
 # ── TAB 4: DOCUMENTS ──────────────────────────────────────────────────────────
