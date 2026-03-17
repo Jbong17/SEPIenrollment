@@ -1835,7 +1835,7 @@ if __name__ == "__main__":
 
 # HR module functions — loaded from hr_module.py with safe fallback
 try:
-    from hr_module import (
+    from hr import (
         _hr_headers, _hr_save, _hr_delete_kv, _hr_load_all, _gen_teacher_id,
         _admin_hr, _hr_staff_directory, _hr_process_payroll, _show_monthly_payroll,
         _hr_payroll_history, _hr_documents, page_payroll_portal, _payroll_process_tab,
