@@ -32,7 +32,7 @@ MGRAY = colors.HexColor("#D1D5DB")
 WHITE = colors.white
 BLACK = colors.black
 
-P = lambda n: f"\u20b1{float(n or 0):,.2f}"
+P = lambda n: f"PHP {float(n or 0):,.2f}"
 Pd= lambda n: f"({P(n)})" if float(n or 0) else "\u2014"
 
 def _styles():
@@ -183,12 +183,12 @@ def build_payslip(r1: dict, r2: dict, teacher: dict) -> bytes:
     def money(n):
         v = float(n or 0)
         if v == 0: return ""
-        return f"₱ {v:>10,.2f}"
+        return f"PHP  {v:>10,.2f}"
 
     def money_b(n):
         v = float(n or 0)
-        if v == 0: return "₱          -"
-        return f"₱ {v:>10,.2f}"
+        if v == 0: return "PHP           -"
+        return f"PHP  {v:>10,.2f}"
 
     L_LW = 1.2*inch  # label col width left side
     L_VW = 1.7*inch  # value col width left side
@@ -250,8 +250,8 @@ def build_payslip(r1: dict, r2: dict, teacher: dict) -> bytes:
     # ── Net Salary ────────────────────────────────────────────────────────────
     story.append(PS("Net Salary", bold=True, sz=10))
     net_tbl = Table([
-        [PS("  1st Period:", sz=10), PS(f"₱ {r1['netPay']:,.2f}", bold=True, sz=10)],
-        [PS("  2nd Period:", sz=10), PS(f"₱ {r2['netPay']:,.2f}", bold=True, sz=10)],
+        [PS("  1st Period:", sz=10), PS(f"PHP  {r1['netPay']:,.2f}", bold=True, sz=10)],
+        [PS("  2nd Period:", sz=10), PS(f"PHP  {r2['netPay']:,.2f}", bold=True, sz=10)],
     ], colWidths=[1.5*inch, 2.0*inch])
     net_tbl.setStyle(TableStyle([
         ("LEFTPADDING",  (0,0),(-1,-1), 4),
@@ -447,30 +447,58 @@ def build_coe(teacher: dict) -> bytes:
     story.append(Paragraph("CERTIFICATE OF EMPLOYMENT",ST["title"]))
     story.append(HRFlowable(width="100%",thickness=1,color=MGRAY,spaceAfter=12))
 
-    # ── Optional 2x2 photo ────────────────────────────────────────────────────
+    story.append(Paragraph("TO WHOM IT MAY CONCERN:",ST["bold"]))
+    story.append(Spacer(1,10))
+
+    # ── Optional 2x2 photo — right-aligned beside the body text ──────────────
     if photo_b64:
         import base64 as _b64
         try:
             raw=_b64.b64decode(photo_b64)
             img_buf=io.BytesIO(raw)
-            photo_img=RLImage(img_buf,width=1.0*inch,height=1.0*inch)
-            ph_tbl=Table([[photo_img,""]],colWidths=[1.1*inch,cw-1.1*inch])
-            ph_tbl.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),
-                                         ("GRID",(0,0),(-1,-1),0,WHITE),
-                                         ("LEFTPADDING",(0,0),(-1,-1),0),
-                                         ("RIGHTPADDING",(0,0),(-1,-1),0)]))
+            # Standard 2x2 inch photo
+            photo_img=RLImage(img_buf, width=1.5*inch, height=1.5*inch)
+            # Place photo right-aligned, body text on the left
+            body_w = cw - 1.8*inch
+            ph_tbl = Table(
+                [[
+                    Paragraph(
+                        f"This is to certify that <b>{name}</b> is a <b>{estatus} {etype}</b> employee of "
+                        f"the <b>{SCHOOL_NAME}</b>, with principal office address at {SCHOOL_ADDRESS}, "
+                        f"currently holding the position of <b>{pos}</b>.",
+                        ST["legal"]),
+                    photo_img
+                ]],
+                colWidths=[body_w, 1.8*inch]
+            )
+            ph_tbl.setStyle(TableStyle([
+                ("VALIGN",        (0,0), (-1,-1), "TOP"),
+                ("GRID",          (0,0), (-1,-1), 0, WHITE),
+                ("LEFTPADDING",   (0,0), (0,-1),  0),
+                ("RIGHTPADDING",  (0,0), (0,-1),  12),
+                ("LEFTPADDING",   (1,0), (1,-1),  0),
+                ("RIGHTPADDING",  (1,0), (1,-1),  0),
+                ("TOPPADDING",    (0,0), (-1,-1),  0),
+                ("BOTTOMPADDING", (0,0), (-1,-1),  0),
+                # Thin border around photo
+                ("BOX",           (1,0), (1,-1),  0.5, MGRAY),
+            ]))
             story.append(ph_tbl)
-            story.append(Spacer(1,4))
+            story.append(Spacer(1,8))
+            # Skip the first paragraph below since we embedded it in the table
+            _photo_para_done = True
         except Exception:
-            pass
+            _photo_para_done = False
+    else:
+        _photo_para_done = False
 
-    story.append(Paragraph("TO WHOM IT MAY CONCERN:",ST["bold"]))
-    story.append(Spacer(1,10))
-    story.append(Paragraph(
-        f"This is to certify that <b>{name}</b> is a <b>{estatus} {etype}</b> employee of "
-        f"the <b>{SCHOOL_NAME}</b>, with principal office address at {SCHOOL_ADDRESS}, "
-        f"currently holding the position of <b>{pos}</b>.",ST["legal"]))
-    story.append(Spacer(1,8))
+    if not _photo_para_done:
+        story.append(Paragraph(
+            f"This is to certify that <b>{name}</b> is a <b>{estatus} {etype}</b> employee of "
+            f"the <b>{SCHOOL_NAME}</b>, with principal office address at {SCHOOL_ADDRESS}, "
+            f"currently holding the position of <b>{pos}</b>.",ST["legal"]))
+        story.append(Spacer(1,8))
+    
     if hired:
         story.append(Paragraph(
             f"He/She has been continuously employed in this institution since <b>{hired}</b> and "
