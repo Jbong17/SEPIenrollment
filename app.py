@@ -16,6 +16,25 @@ from payroll import (compute_payroll, compute_monthly_payroll, sss_employee,
 from hr_pdf import build_payslip, build_payroll_summary, build_coe, build_leave_form
 from pdf_gen import build_enrollment_form, build_contract, build_soa
 
+# HR module functions — loaded from hr.py with safe fallback
+try:
+    from hr import (
+        _hr_headers, _hr_save, _hr_delete_kv, _hr_load_all, _gen_teacher_id,
+        _admin_hr, _hr_staff_directory, _hr_process_payroll, _show_monthly_payroll,
+        _hr_payroll_history, _hr_documents, page_payroll_portal, _payroll_process_tab,
+        _payroll_history_tab, _payroll_staff_tab, _payroll_docs_tab,
+        _admin_leave_module
+    )
+    _HR_MODULE_OK = True
+except ImportError:
+    _HR_MODULE_OK = False
+    def _admin_hr():
+        st.error("⚠️ hr.py not found. Please upload hr.py to your GitHub repo.")
+    def page_payroll_portal():
+        st.error("⚠️ hr.py not found. Please upload hr.py to your GitHub repo.")
+    def _admin_leave_module():
+        st.error("⚠️ hr.py not found.")
+
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="SEPI Enrollment System",
@@ -1832,22 +1851,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# HR module functions — loaded from hr_module.py with safe fallback
-try:
-    from hr import (
-        _hr_headers, _hr_save, _hr_delete_kv, _hr_load_all, _gen_teacher_id,
-        _admin_hr, _hr_staff_directory, _hr_process_payroll, _show_monthly_payroll,
-        _hr_payroll_history, _hr_documents, page_payroll_portal, _payroll_process_tab,
-        _payroll_history_tab, _payroll_staff_tab, _payroll_docs_tab,
-        _admin_leave_module
-    )
-    _HR_MODULE_OK = True
-except ImportError:
-    _HR_MODULE_OK = False
-    def _admin_hr():
-        st.error("⚠️ HR module not loaded. Please upload **hr_module.py** to your GitHub repo.")
-    def page_payroll_portal():
-        st.error("⚠️ HR module not loaded. Please upload **hr_module.py** to your GitHub repo.")
-    def _admin_leave_module():
-        st.error("⚠️ HR module not loaded.")
