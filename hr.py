@@ -73,29 +73,52 @@ def _hr_delete_kv(key: str):
     except Exception: pass
 
 def _hr_load_all():
-    """Load all HR records from KV into session state (once per session)."""
-    import requests, json
-    if st.session_state.hr_loaded: return
+    """
+    Load all HR/Payroll records from Cloudflare KV into session state.
+    Called once per session. Loads: teachers, payroll_runs, leave_records.
+    """
+    import requests, json as _json
+    if st.session_state.hr_loaded:
+        return
     hdrs = _hr_headers()
     if not hdrs:
-        st.session_state.hr_loaded = True; return
-    acct = st.secrets.get("CF_ACCOUNT_ID","")
+        # No credentials — work in-memory only
+        st.session_state.hr_loaded = True
+        return
+    try:
+        acct = st.secrets.get("CF_ACCOUNT_ID","")
+    except Exception:
+        st.session_state.hr_loaded = True
+        return
     base = f"{HR_KV_BASE}/accounts/{acct}/storage/kv/namespaces/{HR_KV_NS}"
     try:
         r = requests.get(f"{base}/keys", headers=hdrs,
-                         params={"limit":1000}, timeout=10)
+                         params={"limit": 1000}, timeout=12)
         if r.status_code != 200:
-            st.session_state.hr_loaded = True; return
-        for item in r.json().get("result",[]):
-            key = item["name"]
-            rv  = requests.get(f"{base}/values/{key}", headers=hdrs, timeout=8)
-            if rv.status_code == 200:
-                record = rv.json()
+            st.session_state.hr_loaded = True
+            return
+        keys = [item["name"] for item in r.json().get("result", [])]
+        for key in keys:
+            try:
+                rv = requests.get(f"{base}/values/{key}", headers=hdrs, timeout=8)
+                if rv.status_code != 200:
+                    continue
+                # Try JSON parse first, fallback to text
+                try:
+                    record = rv.json()
+                except Exception:
+                    continue
                 if key.startswith("teacher:"):
-                    tid = key.replace("teacher:","")
+                    tid = key.replace("teacher:", "")
                     st.session_state.teachers[tid] = record
                 elif key.startswith("payroll:"):
                     st.session_state.payroll_runs[key] = record
+                elif key.startswith("leave:"):
+                    if "leave_records" not in st.session_state:
+                        st.session_state.leave_records = {}
+                    st.session_state.leave_records[key] = record
+            except Exception:
+                continue
     except Exception:
         pass
     st.session_state.hr_loaded = True
@@ -609,18 +632,24 @@ def page_payroll_portal():
     """Standalone payroll portal — accessed via payroll credentials."""
     _hr_load_all()
 
-    # Auto-seed SEPI staff if none enrolled yet
+    # Auto-seed SEPI initial staff ONLY if:
+    # 1. No teachers were loaded from KV (truly empty), AND
+    # 2. KV is not configured (offline mode) OR explicitly not loaded yet
+    # This prevents overwriting custom records added on another device.
     if not st.session_state.teachers:
-        import uuid
-        for idx, staff in enumerate(SEPI_INITIAL_STAFF, 1):
-            tid = f"EMP-{idx:03d}"
-            teacher = {**staff, "teacherId": tid,
-                       "enrolledOn": datetime.datetime.now().isoformat(),
-                       "sssNo": "", "philHealthNo": "", "pagIbigNo": "",
-                       "tin": "", "contact": "", "email": "", "address": "",
-                       "fixedAllowance": 0, "allowanceType": ""}
-            st.session_state.teachers[tid] = teacher
-            _hr_save(f"teacher:{tid}", teacher)
+        hdrs_check = _hr_headers()
+        if not hdrs_check:
+            # Offline mode — seed from defaults so the portal is usable
+            for idx, staff in enumerate(SEPI_INITIAL_STAFF, 1):
+                tid = f"EMP-{idx:03d}"
+                teacher = {**staff, "teacherId": tid,
+                           "enrolledOn": datetime.datetime.now().isoformat(),
+                           "sssNo": "", "philHealthNo": "", "pagIbigNo": "",
+                           "tin": "", "contact": "", "email": "", "address": "",
+                           "ancillaryPay": staff.get("ancillaryPay", 0)}
+                st.session_state.teachers[tid] = teacher
+        # If KV IS configured but returned empty, do NOT auto-seed —
+        # the user will add staff manually via the Staff Directory.
 
     with st.sidebar:
         if LOGO_PATH and os.path.exists(LOGO_PATH):
