@@ -544,7 +544,21 @@ def _show_payroll_run(run: dict, label: str, caller: str = "main"):
             if col.button(f"📄 {r.get('teacherName','').split(',')[0]}",
                           key=f"genpslip_{caller}_{tid}_{run['periodKey']}", use_container_width=True):
                 _teacher = st.session_state.teachers.get(tid, r)
-                st.session_state[ps_key] = build_payslip(r["p1"], r["p2"], _teacher)
+                if "p1" in r and "p2" in r:
+                    st.session_state[ps_key] = build_payslip(r["p1"], r["p2"], _teacher)
+                elif "periodType" in r:
+                    if r.get("periodType") == "1st":
+                        _r1s, _r2s = r, {**r,"periodType":"2nd","sss":0,"philHealth":0,
+                                         "pagIbig":0,"salaryLoan":0,"tuitionFee":0,
+                                         "totalDeductions":0,"totalGovDeductions":0}
+                    else:
+                        _r1s = {**r,"periodType":"1st","sss":0,"philHealth":0,"pagIbig":0,
+                                "salaryLoan":0,"tuitionFee":0,"totalDeductions":0,
+                                "totalGovDeductions":0,"netPay":r.get("basePay",0)}
+                        _r2s = r
+                    st.session_state[ps_key] = build_payslip(_r1s, _r2s, _teacher)
+                else:
+                    st.session_state[ps_key] = build_payslip(r, r, _teacher)
                 st.rerun()
         else:
             col.download_button(
@@ -708,9 +722,32 @@ def _hr_documents():
         if not st.session_state.get(ps_key):
             if st.button("📄 Generate Payslip", key="gen_ps_doc", use_container_width=True):
                 with st.spinner("Generating…"):
-                    _t = st.session_state.teachers.get(sel_emp, run_results[sel_emp])
-                    st.session_state[ps_key] = build_payslip(
-                        run_results[sel_emp]["p1"], run_results[sel_emp]["p2"], _t)
+                    _t   = st.session_state.teachers.get(sel_emp, {})
+                    _res = run_results[sel_emp]
+                    # Handle both monthly (p1/p2) and single-period structures
+                    if "p1" in _res and "p2" in _res:
+                        _r1, _r2 = _res["p1"], _res["p2"]
+                    elif "periodType" in _res:
+                        # Single-period run — use the same result for both periods
+                        # and zero out deductions on whichever is displayed as 1st
+                        if _res.get("periodType") == "1st":
+                            _r1, _r2 = _res, {**_res, "periodType":"2nd",
+                                              "grossPay":_res.get("grossPay",0),
+                                              "netPay":_res.get("netPay",0),
+                                              "sss":0,"philHealth":0,"pagIbig":0,
+                                              "salaryLoan":0,"tuitionFee":0,
+                                              "totalDeductions":0,"totalGovDeductions":0}
+                        else:
+                            _r1 = {**_res, "periodType":"1st",
+                                   "sss":0,"philHealth":0,"pagIbig":0,
+                                   "salaryLoan":0,"tuitionFee":0,
+                                   "totalDeductions":0,"totalGovDeductions":0,
+                                   "netPay":_res.get("basePay",0)}
+                            _r2 = _res
+                    else:
+                        st.error("Cannot determine payroll structure. Please reprocess this payroll run.")
+                        _r1 = _r2 = _res
+                    st.session_state[ps_key] = build_payslip(_r1, _r2, _t)
                 st.rerun()
         else:
             st.download_button(
