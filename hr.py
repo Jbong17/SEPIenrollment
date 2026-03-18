@@ -478,6 +478,7 @@ def _hr_process_payroll():
                                       key=f"dedlbl_{tid}_{period_key}")
             inputs[tid] = {
                 "period":       period_key,
+                "period_type":  "1st" if co_num == 1 else "2nd",
                 "cutoffLabel":  cutoff_label,
                 "absences":     abs_days,
                 "tardiness_hrs":tard_hrs,
